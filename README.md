@@ -1,6 +1,4 @@
-# Taridev Software Factory 2.0 (alpha)
-
-Prototipo local Windows de una fabrica autonoma de software. **No es todavia una fabrica distribuida**; sigue siendo single-process/local.
+# DevFactory 2.9 (alpha)
 
 ## Requisitos
 

@@ -1,5 +1,6 @@
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -7,8 +8,12 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { handlePreview } from "./runner.js";
 import { handleZip } from "./zip.js";
+import { JobProcessRegistry, terminateChildTree, WorkerLease } from "./job-coordinator.js";
+import { appendVerificationEvidence, getProjectVerification, runProjectChecks, type VerificationCheck } from "./project-verification.js";
+import { captureDeliveryReportState, validateDeliveryCompletion, wasDeliveryReportUpdatedSince } from "./delivery-report.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+process.env.OPENCODE_DB = ":memory:";
 const DATA = path.join(ROOT, "data");
 const PROJECTS = path.join(ROOT, "projects");
 const DB = path.join(DATA, "jobs.json");
@@ -87,6 +92,8 @@ for (const j of jobs) if (j.status === "running") {
 const save = () => fs.writeFileSync(DB, JSON.stringify(jobs, null, 2));
 save();
 let active: { id: string; child: ChildProcessByStdio<null, Readable, Readable> } | null = null;
+const workerLease = new WorkerLease();
+const jobProcesses = new JobProcessRegistry(killTree);
 const stamp = () => new Date().toISOString();
 function log(j: Job, s: string) {
   j.logs.push(...s.split(/\r?\n/).filter(Boolean).map(x => `[${stamp()}] ${x.slice(0, 3000)}`));
@@ -112,11 +119,9 @@ const OPENCODE_BIN = (() => {
 })();
 
 function killTree(child: ChildProcess) {
-  if (!child.pid) return;
-  if (process.platform === "win32") {
-    try { spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); } catch {}
-  }
-  try { child.kill(); } catch {}
+  terminateChildTree(child, process.platform, (command, args) =>
+    spawn(command, args, { windowsHide: true, stdio: "ignore" })
+  );
 }
 
 function effectiveModel(agent: AgentId): string {
@@ -144,24 +149,28 @@ function normalizeSettings(input: any): ModelSettings | null {
   };
 }
 
-function listOpenCodeModels(): Promise<{ ok: boolean; output: string; error?: string }> {
+function listOpenCodeModels(jobId?: string): Promise<{ ok: boolean; output: string; error?: string }> {
   return new Promise(resolve => {
     const child = spawn(OPENCODE_BIN, ["models"], { cwd: ROOT, env: { ...process.env, CI: "1", NO_COLOR: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    if (jobId) jobProcesses.add(jobId, child);
     let output = "";
     let settled = false;
+    let timedOut = false;
     const finish = (result: { ok: boolean; output: string; error?: string }) => {
       if (settled) return; settled = true; clearTimeout(timer); resolve(result);
     };
-    const timer = setTimeout(() => { child.kill(); finish({ ok: false, output, error: "La consulta `opencode models` ha superado 15 segundos." }); }, 15000);
+    const timer = setTimeout(() => { if (settled) return; timedOut = true; killTree(child); }, 15000);
     child.stdout.on("data", (d: Buffer) => { output += d.toString("utf8"); });
     child.stderr.on("data", (d: Buffer) => { output += d.toString("utf8"); });
     child.on("error", e => finish({ ok: false, output, error: `No se pudo ejecutar OpenCode: ${e.message}. Comprueba que opencode está instalado y en PATH.` }));
-    child.on("close", code => finish({ ok: code === 0, output, ...(code === 0 ? {} : { error: `opencode models terminó con código ${code}.` }) }));
+    child.on("close", code => finish(timedOut
+      ? { ok: false, output, error: "La consulta `opencode models` ha superado 15 segundos." }
+      : { ok: code === 0, output, ...(code === 0 ? {} : { error: `opencode models terminó con código ${code}.` }) }));
   });
 }
-async function validateConfiguredModels(): Promise<{ ok: boolean; models: string[]; message: string; output?: string }> {
+async function validateConfiguredModels(jobId?: string): Promise<{ ok: boolean; models: string[]; message: string; output?: string }> {
   const required = [...new Set([effectiveModel("factory-manager"), effectiveModel("developer"), effectiveModel("qa-reviewer")])];
-  const result = await listOpenCodeModels();
+  const result = await listOpenCodeModels(jobId);
   if (!result.ok) return { ok: false, models: required, message: result.error || "No se pudo consultar OpenCode.", output: result.output.slice(-5000) };
   const clean = result.output.replace(/\u001b\[[0-9;]*m/g, "");
   const missing = required.filter(model => !clean.includes(model));
@@ -215,8 +224,8 @@ function parseModelBlocks(output: string): ModelMeta[] {
 }
 
 function listOpenCodeModelsVerbose(): Promise<{ ok: boolean; models: ModelMeta[]; error?: string }> {
-  return new Promise(resolve => {
-    const bin = OPENCODE_BIN;
+  const bin = OPENCODE_BIN;
+  const commandErrorWrapped = new Promise<{ ok: boolean; models: ModelMeta[]; error?: string }>(resolve => {
     const child = spawn(bin, ["models", "--verbose"], { cwd: ROOT, env: { ...process.env, CI: "1", NO_COLOR: "1" }, shell: bin.endsWith(".cmd") || bin.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let settled = false;
@@ -233,6 +242,47 @@ function listOpenCodeModelsVerbose(): Promise<{ ok: boolean; models: ModelMeta[]
       else finish({ ok: false, models, error: code === 0 ? "No se pudieron parsear modelos." : `opencode models --verbose terminó con código ${code}.` });
     });
   });
+
+  return (async () => {
+    const result = await commandErrorWrapped;
+    if (result.ok) return result;
+    const cachePath = path.join(os.homedir(), ".cache", "opencode", "models.json");
+    if (!fs.existsSync(cachePath)) return result;
+    try {
+      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+      const flat: ModelMeta[] = [];
+      for (const provider of Object.values(cache || {})) {
+        const providerID = typeof (provider as any)?.id === "string" ? (provider as any).id : "";
+        const models = (provider as any)?.models;
+        if (!models || typeof models !== "object") continue;
+        for (const [modelId, info] of Object.entries(models)) {
+          const id = typeof (info as any)?.id === "string" ? (info as any).id : (typeof (info as any)?.canonical_model_id === "string" ? (info as any).canonical_model_id : modelId);
+          if (!id || !id.includes("/")) continue;
+          flat.push({
+            id,
+            name: typeof (info as any)?.name === "string" ? (info as any).name : id,
+            providerID: typeof (info as any)?.providerID === "string" ? (info as any).providerID : (providerID || id.split("/")[0]),
+            status: typeof (info as any)?.status === "string" ? (info as any).status : undefined,
+            capabilities: (info as any)?.capabilities ? {
+              reasoning: !!(info as any).capabilities.reasoning,
+              input: {
+                text: !!(info as any).capabilities.input?.text,
+                image: !!(info as any).capabilities.input?.image,
+                audio: !!(info as any).capabilities.input?.audio,
+                pdf: !!(info as any).capabilities.input?.pdf,
+                video: !!(info as any).capabilities.input?.video
+              }
+            } : undefined,
+            limit: (info as any)?.limit ? { context: Number((info as any).limit.context) || 0, output: Number((info as any).limit.output) || 0 } : undefined,
+            cost: (info as any)?.cost ? { input: Number((info as any).cost.input) || 0, output: Number((info as any).cost.output) || 0 } : undefined
+          });
+        }
+      }
+      return { ok: true, models: flat };
+    } catch {
+      return result;
+    }
+  })();
 }
 
 const KNOWN_MODEL_ERRORS: { test: RegExp; message: string }[] = [
@@ -337,6 +387,7 @@ function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
     if (settings.autoApprove) args.push("--auto");
     args.push(prompt);
     const child = spawn(OPENCODE_BIN, args, { cwd: j.directory, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    jobProcesses.add(j.id, child);
     active = { id: j.id, child };
     let finished = false;
     let tailOutput = "";
@@ -379,17 +430,18 @@ function runLightAgent(j: Job, prompt: string): Promise<{ ok: boolean; output: s
     const model = effectiveModel("developer");
     j.phase = `brain · ${model}`; save();
     const child = spawn(OPENCODE_BIN, ["run", "--model", model, "--agent", "build", prompt], { cwd: j.directory, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    jobProcesses.add(j.id, child);
     let output = "";
     let done = false;
-    const cleanup = () => { clearTimeout(timer); killTree(child); };
-    const timer = setTimeout(() => { if (done) return; done = true; cleanup(); resolve({ ok: false, output }); }, 20 * 60 * 1000);
+    let timedOut = false;
+    const timer = setTimeout(() => { if (done) return; timedOut = true; killTree(child); }, 20 * 60 * 1000);
     const onData = (d: Buffer) => { output += d.toString("utf8"); log(j, d.toString("utf8")); };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
     child.on("error", e => { if (done) return; done = true; clearTimeout(timer); log(j, "Error al iniciar OpenCode: " + e.message); resolve({ ok: false, output }); });
     child.on("close", code => {
       if (done) return; done = true; clearTimeout(timer);
-      if (code === 0 && j.status !== "cancelled") return resolve({ ok: true, output });
+      if (code === 0 && !timedOut && j.status !== "cancelled") return resolve({ ok: true, output });
       resolve({ ok: false, output });
     });
   });
@@ -398,11 +450,12 @@ function runLightAgent(j: Job, prompt: string): Promise<{ ok: boolean; output: s
 function execInProject(j: Job, command: string, args: string[], timeout = 180000): Promise<{ ok: boolean; output: string }> {
   return new Promise(resolve => {
     const proc = spawn(command, args, { cwd: j.directory, shell: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    jobProcesses.add(j.id, proc);
     let output = "";
     let finished = false;
+    let timedOut = false;
     const timer = setTimeout(() => {
-      if (finished) return; finished = true; try { killTree(proc); } catch {}
-      resolve({ ok: false, output: `${output}\n[TIMEOUT: ${timeout}ms exceeded]` });
+      if (finished) return; timedOut = true; try { killTree(proc); } catch {}
     }, timeout);
     const onData = (d: Buffer) => { output += d.toString("utf8"); log(j, d.toString("utf8")); };
     proc.stdout!.on("data", onData);
@@ -413,47 +466,51 @@ function execInProject(j: Job, command: string, args: string[], timeout = 180000
     });
     proc.on("close", code => {
       if (finished) return; finished = true; clearTimeout(timer);
-      resolve({ ok: code === 0, output });
+      resolve({ ok: code === 0 && !timedOut, output: timedOut ? `${output}\n[TIMEOUT: ${timeout}ms exceeded]` : output });
     });
   });
 }
 
 async function verifyProject(j: Job): Promise<{ ok: boolean; summary: string }> {
-  if (!fs.existsSync(path.join(j.directory, "package.json"))) {
-    if (!fs.existsSync(path.join(j.directory, "index.html"))) {
-      return { ok: false, summary: "No se encontró package.json ni index.html en el proyecto." };
-    }
-    return { ok: true, summary: "Verificación superficial: index.html presente (proyecto estático)." };
+  const verification = getProjectVerification(j.directory);
+  if (verification.kind === "static") return { ok: true, summary: "Verificación superficial: index.html presente (proyecto estático)." };
+  if (verification.kind === "invalid") {
+    const summary = verification.error || "El proyecto no tiene verificaciones válidas.";
+    appendVerificationEvidence(j.directory, [], false);
+    return { ok: false, summary };
   }
-  let summary = "";
+  let installSummary = "";
+  const installCheck: VerificationCheck[] = [];
   // Install dependencies only if missing.
   if (!fs.existsSync(path.join(j.directory, "node_modules"))) {
     const install = await execInProject(j, "npm", ["install"], 240000);
-    summary += `npm install: ${install.ok ? "OK" : "FAIL"}\n`;
-    if (!install.ok) return { ok: false, summary: `${summary}\n${install.output.slice(-3000)}` };
+    installSummary = `npm install: ${install.ok ? "OK" : "FAIL"}`;
+    installCheck.push({ command: "npm install", ok: install.ok });
+    if (!install.ok) {
+      const summary = `${installSummary}\n${install.output.slice(-3000)}`;
+      appendVerificationEvidence(j.directory, installCheck, false);
+      return { ok: false, summary };
+    }
   }
-  const pkg: { scripts?: Record<string, string> } = JSON.parse(fs.readFileSync(path.join(j.directory, "package.json"), "utf8"));
-  const scripts = (pkg.scripts || {}) as Record<string, string>;
-  if (scripts.build) {
-    const build = await execInProject(j, "npm", ["run", "build"], 240000);
-    summary += `npm run build: ${build.ok ? "OK" : "FAIL"}\n`;
-    if (!build.ok) return { ok: false, summary: `${summary}\n${build.output.slice(-3000)}` };
-  }
-  if (scripts.test) {
-    const test = await execInProject(j, "npm", ["test"], 240000);
-    summary += `npm test: ${test.ok ? "OK" : "FAIL"}`;
-    if (!test.ok) return { ok: false, summary: `${summary}\n${test.output.slice(-3000)}` };
-  }
-  return { ok: true, summary: summary.trim() || "Verificación técnica OK." };
+  const checks = await runProjectChecks(j.directory, verification.scripts, async (directory, script) =>
+    execInProject(j, "npm", script === "build" ? ["run", "build"] : ["test"], 240000)
+  );
+  const verificationChecks = [...installCheck, ...checks.checks];
+  const summary = [installSummary, checks.summary, checks.output].filter(Boolean).join("\n");
+  appendVerificationEvidence(j.directory, verificationChecks, checks.ok);
+  return { ok: checks.ok, summary: summary || "Verificación técnica OK." };
 }
 
 async function worker() {
-  if (active || !jobs.some(j => j.status === "queued")) return;
-  const j = jobs.find(x => x.status === "queued")!;
+  const releaseWorker = workerLease.tryAcquire();
+  if (!releaseWorker) return;
+  const j = jobs.find(x => x.status === "queued");
+  if (!j) { releaseWorker(); return; }
   j.status = "running"; j.updatedAt = stamp(); save();
   try {
     log(j, "Validando los modelos configurados con `opencode models` antes de ejecutar...");
-    const validation = await validateConfiguredModels();
+    const validation = await validateConfiguredModels(j.id);
+    if ((j.status as Status) === "cancelled") return;
     if (!validation.ok) {
       log(j, "Validación de modelos fallida: " + validation.message);
       if (validation.output) log(j, validation.output);
@@ -464,7 +521,7 @@ async function worker() {
       // Brain phase: decide whether the job needs the full pipeline (plan → code → QA) or just a focused implementation.
       log(j, "Fase brain: evaluando la complejidad de la solicitud antes de delegar el trabajo.");
       const brain = await runLightAgent(j, `Evalúa la naturaleza de esta solicitud y responde SOLO con una palabra en mayúsculas: STATIC si basta HTML/CSS estático sin lógica/backend/build, SIMPLE si es un ejemplo mínimo con poco código, COMPLEJA si requiere arquitectura, backend, frontend o varias funcionalidades. Solicitud: ${j.request}`);
-      if ((j.status as Status) === "cancelled") { j.status = "failed"; j.phase = "Cancelado"; save(); j.updatedAt = stamp(); save(); setImmediate(worker); return; }
+      if ((j.status as Status) === "cancelled") { j.phase = "Cancelado"; return; }
       const brainText = brain.ok ? brain.output.toUpperCase() : "";
       const isStatic = brain.ok && /\bSTATIC\b/.test(brainText) && !/\bSIMPLE\b/.test(brainText) && !/\bCOMPLEJA\b/.test(brainText);
       const isSimple = brain.ok && /\bSIMPLE\b/.test(brainText) && !/\bCOMPLEJA\b/.test(brainText) && !/\bSTATIC\b/.test(brainText);
@@ -532,21 +589,43 @@ async function worker() {
             // Delivery phase
             j.phase = "Preparando entrega";
             save();
-            const deliveryModel = effectiveModel("delivery-manager");
-            const delOk = await runAgent(j, "delivery-manager", `Revisa la preparación de la entrega del proyecto y genera DELIVERY_REPORT.md con: resumen de funcionalidades implementadas, dependencias necesarias, variables de entorno requeridas (sin secretos), instrucciones de instalación y ejecución, problemas conocidos y limitaciones. No despliegues ni hagas push.`);
+            const deliveryBeforeState = captureDeliveryReportState(j.directory);
+            const deliveryStartedAtNs = BigInt(Date.now()) * 1_000_000n;
+            const delOk = await runAgent(j, "delivery-manager", `Revisa el proyecto final y crea o actualiza DELIVERY_REPORT.md. El archivo debe incluir estos encabezados exactos, cada uno con contenido útil:
+## Funcionalidades
+## Dependencias
+## Variables de entorno
+## Instalación y ejecución
+## Problemas conocidos y limitaciones
+No incluyas valores secretos ni afirmes verificaciones sin evidencia. No modifiques código, no despliegues ni hagas push.`);
             if ((j.status as Status) === "cancelled") return;
-            if (!delOk) {
-              log(j, "Delivery Manager no pudo completar el informe; se continúa como validado.");
+            const reportPath = path.join(j.directory, "DELIVERY_REPORT.md");
+            const reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, "utf8") : "";
+            const reportFresh = wasDeliveryReportUpdatedSince(j.directory, deliveryStartedAtNs, deliveryBeforeState);
+            const deliveryCompletion = validateDeliveryCompletion(delOk, reportFresh, reportContent);
+            if (!deliveryCompletion.ok) {
+              const reason = !delOk && j.lastError ? j.lastError : deliveryCompletion.error || "Informe de entrega inválido.";
+              j.status = "failed";
+              j.phase = "Falló delivery-manager";
+              j.lastError = reason;
+              log(j, `Motivo del fallo: ${reason}`);
+            } else {
+              j.status = "validated";
+              j.phase = "Validado (ver QA_REPORT.md y DELIVERY_REPORT.md)";
             }
-            j.status = "validated";
-            j.phase = "Validado (ver QA_REPORT.md y DELIVERY_REPORT.md)";
           }
         }
       }
       if (j.status === "running") { j.status = "done"; j.phase = "Revisión terminada (ver QA_REPORT.md)"; }
     }
-  } catch (e) { j.status = "failed"; j.phase = "Error de ejecución"; log(j, String(e)); }
-  j.updatedAt = stamp(); save(); setImmediate(worker);
+  } catch (e) {
+    if ((j.status as Status) !== "cancelled") { j.status = "failed"; j.phase = "Error de ejecución"; log(j, String(e)); }
+  } finally {
+    await jobProcesses.finish(j.id);
+    j.updatedAt = stamp(); save();
+    releaseWorker();
+    if (jobs.some(job => job.status === "queued")) setImmediate(worker);
+  }
 }
 
 function safeProjectPath(input: string): string | null {
@@ -638,9 +717,11 @@ const server = http.createServer(async (req, res) => {
   if (match && req.method === "POST") {
     const j = jobs.find(x => x.id === match[1]);
     if (!j) return reply(res, 404, { error: "No encontrado" });
-    if (["done", "failed"].includes(j.status)) return reply(res, 409, { error: "Trabajo terminado" });
+    if (!["queued", "running"].includes(j.status)) return reply(res, 409, { error: "Solo se pueden cancelar trabajos en cola o ejecución" });
+    const wasQueued = j.status === "queued";
     j.status = "cancelled"; j.phase = "Cancelado"; save();
-    if (active?.id === j.id) { killTree(active.child); active = null; }
+    jobProcesses.cancel(j.id);
+    if (wasQueued) await jobProcesses.finish(j.id);
     return reply(res, 200, { ok: true });
   }
   const retryMatch = u.pathname.match(/^\/api\/jobs\/([a-f0-9]{8})\/retry$/);
@@ -648,6 +729,7 @@ const server = http.createServer(async (req, res) => {
     const j = jobs.find(x => x.id === retryMatch[1]);
     if (!j) return reply(res, 404, { error: "No encontrado" });
     if (!["failed", "cancelled"].includes(j.status)) return reply(res, 409, { error: "Solo se pueden reintentar trabajos fallidos o cancelados" });
+    if (jobProcesses.isActive(j.id)) return reply(res, 409, { error: "El trabajo anterior todavía está terminando" });
     j.status = "queued"; j.phase = "En cola (reintento)"; j.lastError = undefined;
     log(j, "Reintento solicitado por el usuario.");
     setImmediate(worker);

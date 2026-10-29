@@ -21,13 +21,16 @@ Prototipo local Windows de una fabrica autonoma de software. **No es todavia una
 - API Node.js/TypeScript en 127.0.0.1:4177.
 - Interfaz Vite/TypeScript en 127.0.0.1:5173.
 - Cola persistida en `data/jobs.json`, un trabajo a la vez.
+- Worker con exclusión durante todo el ciclo y cancelación por árbol de procesos en todas las fases; un trabajo cancelado no se convierte en `failed` al cerrar. La cola conserva su orden.
 - Fases segun complejidad:
 - brain: fase ligera que clasifica la solicitud como STATIC, SIMPLE o COMPLEJA.
 - STATIC: developer (genera index.html + estilos + README) sin QA.
 - SIMPLE: developer (implementa + tests) + qa-reviewer (valida).
 - COMPLEJA: factory-manager (PLAN.md) + developer (siguendo plan) + qa-reviewer (valida).
 - Correccion automatica: tras las fases, se ejecuta una verificacion tecnica real (npm install/build/test). Si falla, developer recibe el error concreto y se repite hasta 3 intentos. Si no se logra -> estado `Requiere intervencion`.
+- QA técnico: los proyectos de paquete deben tener al menos un script `build` o `test`; se ejecutan todos los configurados. Proyectos estáticos requieren `index.html` y se etiquetan como verificación superficial. El resultado automático se añade a `QA_REPORT.md` sin volcar salida cruda.
 - Delivery Manager: revisa la entrega y genera DELIVERY_REPORT.md (funcionalidades, dependencias, variables de entorno, instrucciones, problemas conocidos).
+- Un trabajo solo queda `validated` si el agente dedicado termina correctamente y genera/actualiza en esa fase un `DELIVERY_REPORT.md` no vacío con las cinco secciones requeridas; fallos quedan `failed` con motivo.
 - Los agentes se configuran por agente (factory-manager, developer, qa-reviewer, delivery-manager) con selector desplegable y prueba individual por modelo.
 - El selector **Modelo común / fallback** también incluye **Probar** y tooltip al pasar el cursor o recibir foco. Todas las pruebas usan el modelo seleccionado con el agente integrado `build` y una instrucción de responder solo OK, sin herramientas: no ejecutan los planes de los agentes de fábrica ni cambian los modelos seleccionados. El resultado sí se registra en el historial y estado del modelo.
 - `autoApprove` (casilla): si esta marcada, los agentes ejecutan herramientas sin pedir permiso; desmarcada, OpenCode las rechaza y se informa en el log.
@@ -38,8 +41,9 @@ Prototipo local Windows de una fabrica autonoma de software. **No es todavia una
 - Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas). Al reiniciar, jobs en ejecucion -> `failed` + lastError.
 - Proyectos generados en `projects/<slug>-<id>/` con README, codigo, tests, dist, QA_REPORT, DELIVERY_REPORT.
 - Modificacion de proyectos existentes: endpoint `/api/jobs` acepta `directory` existente + checkpoint automático en `projects/<slug>-<id>-checkpoint`.
-- Vista previa: arranca/detiene apps y sirve archivos estaticos (con MIME). Proteccion de traversal.
-- ZIP: genera ZIP excluyendo node_modules, .git, .env, .env.*, .cache, *.log.
+- Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado y symlinks fuera del proyecto.
+- ZIP: excluye `.git`, `node_modules`, `.cache` y logs. Antes de crear el archivo inspecciona nombres y fingerprints de alta confianza; si encuentra credenciales/llaves o no puede completar el escaneo, bloquea la descarga sin devolver valores secretos. Empaqueta un snapshot de los bytes inspeccionados. Límites: 20 000 entradas, 1 MiB por archivo y 50 MiB inspeccionados.
+- El escaneo conservador puede bloquear proyectos con archivos legítimos grandes; no garantiza detectar todo formato de secreto. No empaquetes proyectos con credenciales.
 
 ## Endpoints principales
 
@@ -57,7 +61,7 @@ Prototipo local Windows de una fabrica autonoma de software. **No es todavia una
 
 - Jobs cancelados/no terminados -> `failed` al reiniciar, con lastError human-readable.
 - No se ejecutan comandos fuera de `projects/`.
-- Secretos/api keys nunca se empaquetan.
+- ZIP aplica detección por nombres y fingerprints de alta confianza; no es un escáner universal ni reemplaza la revisión del proyecto.
 - No se hace push ni despliegue sin autorizacion.
 - Procesos hijos se detienen en cancelacion mediante `taskkill /T /F`.
 
@@ -81,6 +85,6 @@ Prototipo local Windows de una fabrica autonoma de software. **No es todavia una
 ## Prueba rapida
 
 - `npm run build` verifica TypeScript y construye la interfaz.
-- `npm test` ejecuta las pruebas de regresión del botón, tooltip y comprobación de modelos, sin llamar a proveedores reales.
+- `npm test` ejecuta pruebas unitarias/regresión y handlers ZIP/preview con fixtures sintéticos; no llama a proveedores reales. En Windows, los tests de ZIP usan `tar.exe`.
 - `curl http://127.0.0.1:4177/api/health` comprueba la API mientras esta en ejecucion.
 - Crea un proyecto "hola mundo" desde DevFactory y observa logs/QA report.

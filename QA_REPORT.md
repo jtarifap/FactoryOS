@@ -1,44 +1,50 @@
-# QA_REPORT.md - Ultimo reporte de calidad
-Fecha: 2026-10-28 (local)
+# QA Report — DevFactory 2.0
 
-## Corrección: selección de proyecto durante refresco automático
-- Causa: cada 3 segundos se reconstruían las opciones sin conservar la selección.
-- Se conserva la selección actual de Vista previa/ZIP y modificación, incluso si cambia mientras llega la respuesta HTTP; si el proyecto desaparece, vuelve al placeholder.
-- Regresión: tres pruebas reprodujeron la pérdida de selección antes de corregirla; también se comprueba el proyecto eliminado.
-- Verificación: `npm test` PASS (10/10); `npm run build` PASS.
+Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en worktree aislado `high-priority-hardening`; el código rastreado de `main` sigue en `66bfce5`. Los documentos de diseño/plan están sin seguimiento en el checkout original.
 
-## Corrección: timeout al probar modelos
-- Causa reproducida: `factory-manager` interpreta la prueba como una tarea de planificación y empieza a revisar archivos, en lugar de responder OK.
-- La comprobación ahora usa el agente integrado `build`, instrucción explícita sin herramientas y salida JSON. Un proceso que termina sin texto del modelo ya no cuenta como conexión válida.
-- `Free usage limit reached` se reconoce inmediatamente como límite gratuito, sin esperar 90 segundos.
-- Verificación real: POST `/api/models/test` con `openai/gpt-6-luna` y `factory-manager` devolvió `{ "ok": true, "duration": 4442 }` tras la corrección.
-- `npm test`: 6/6 pasan. `npm run build`: PASS.
-- Esta verificación no garantiza cuota ni disponibilidad de otros modelos/proveedores.
+## Resultado
 
-## Corrección: modelo común / fallback
-- Añadidos botón **Probar** y tooltip (hover y foco), usando el estilo existente.
-- Pruebas de regresión: 3 fallaban antes de la corrección; 3 pasan después. Cubren envío del modelo seleccionado, tooltip y recuperación ante error de conexión.
-- Navegador local: botón presente, 162 opciones, tooltip visible con el ID seleccionado y oculto al salir.
-- Las pruebas automatizadas simulan HTTP; no ejecutan modelos reales ni consumen cuota.
-- El resto de este documento conserva verificaciones e incidencias históricas; no representa una nueva validación completa de la aplicación.
+- `npm test`: **62/62 PASS**.
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- `git diff --check`: sin errores; Git muestra únicamente avisos de conversión LF/CRLF de Windows.
+- No se ejecutó generación con proveedor real ni se leyeron credenciales.
 
-## Comandos ejecutados
-- `npm run build` -> PASS (tsc --noEmit + vite build)
-- `npm run dev` (tsx watcher + vite start) local
-- GET/POST endpoints verificados (health, settings, models, models/test)
-- Preview estatico/dinamico (HTTP 200)
-- ZIP descarga (HTTP 200, 15581 bytes)
+## Prioridad 1 — worker y cancelación
 
-## Restultados reales
-- Backend core functions presentes.
-- Frontend simplificado (reducido por incidente de sintaxis).
-- Incidente de datos: settings/jobs/model-tests reseteados (autoApprove:false, defaults).
-- Verificado con browser: tooltip, mode common, preview.
+- Lease excluye workers solapados durante todo el ciclo; los nuevos trabajos continúan en cola FIFO.
+- Se registran procesos de validación de modelos, brain, agentes y npm por ID de trabajo. Cancelar termina el árbol de procesos y deja el estado `cancelled`.
+- El lease no se libera hasta que los hijos registrados cierran, incluso después de timeout. Esto evita avanzar de fase o trabajo mientras siga vivo un hijo.
+- Endpoint de cancelación solo acepta trabajos `queued` o `running`.
+- Retry devuelve 409 mientras el worker anterior todavía mantiene el registro del job. En Windows, `taskkill /T /F` termina el árbol antes de señalizar el padre; un test crea y termina una pareja real de procesos.
+- Pruebas usan procesos simulados y verificaciones de integración del cableado; no se lanzó un trabajo OpenCode completo con proveedor.
 
-## Problemas pendientes
-- Restauracion completa interfaz.
-- Unit tests reales no creados (requiere re implementar o limpiar UI).
+## Prioridad 2 — criterios de QA
 
-## Instrucciones de arranque
-npm install && npm run dev
->
+- Proyecto estático requiere `index.html` y se reporta como verificación superficial.
+- Proyecto con `package.json` requiere `build` o `test`; se ejecutan todos los configurados, en orden build/test. Sin controles, con JSON inválido o con fallo de comando, QA falla.
+- Evidencia automatizada estructurada se anexa a `QA_REPORT.md` sin reemplazar notas existentes ni copiar salida cruda.
+- `index.html` debe ser un archivo regular; los resultados QA son estructurados y una salida de compilador no puede fingir resultados.
+
+## Prioridad 3 — entrega
+
+- Añadido `.opencode/agents/delivery-manager.md`.
+- `validated` exige proceso exitoso y un `DELIVERY_REPORT.md` actualizado en esa fase, no vacío y con cinco secciones completas. En caso contrario, el trabajo queda `failed` con motivo/log.
+- El informe anterior no se borra antes de ejecutar el agente.
+- El estado previo del informe (mtime/tamaño/inode) se compara con el posterior; una fecha futura preexistente no prueba que el agente lo haya generado.
+
+## Prioridad 4 — seguridad
+
+- ZIP escanea nombres y patrones de secreto de alta confianza; un hallazgo o límite excedido bloquea el ZIP y reporta solo rutas, nunca valores.
+- Se empaqueta un snapshot con los mismos bytes que se inspeccionaron, no el directorio modificable original. Variantes en mayúsculas de rutas excluidas se inspeccionan o bloquean según el matcher de tar.
+- Preview estático niega rutas sensibles, traversal, project roots que sean junctions fuera de `projects/` y symlinks que salgan del proyecto.
+- Metadata variable de jobs y tooltip de modelos se renderiza mediante `textContent` y nodos DOM.
+- Pruebas usan exclusivamente secretos sintéticos. No garantizan detección de todos los formatos posibles.
+- Límites deliberados del escáner: 20 000 entradas, 1 MiB por archivo y 50 MiB total. Proyectos con archivos mayores pueden quedar bloqueados aunque sean legítimos.
+- Integración ZIP se probó con `tar.exe` y un proyecto temporal limpio; archivos de credenciales ficticios fueron bloqueados.
+
+## Cobertura pendiente
+
+- E2E completo del worker contra un proveedor OpenCode real y modelos externos.
+- Pruebas de carga/concurrencia prolongadas con procesos OpenCode reales.
+- La API sigue siendo local sin autenticación; no exponer a Internet.
+- El escaneo usa fingerprints de alta confianza y no sustituye revisión manual ni gestor de secretos.

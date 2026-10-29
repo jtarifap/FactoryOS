@@ -8,10 +8,14 @@ import ts from "typescript";
 async function mount(testResponse = { ok: true }) {
   const elements = [];
   class Element {
-    children = []; style = {}; dataset = {}; listeners = {};
-    value = ""; textContent = ""; disabled = false;
+    children = []; style = {}; dataset = {}; listeners = {}; ownText = "";
+    value = ""; disabled = false;
     constructor(tag) { this.tagName = tag; elements.push(this); }
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
+    append(...children) { children.forEach(child => this.appendChild(child)); }
+    replaceChildren(...children) { this.children = []; this.ownText = ""; this.append(...children); }
+    set textContent(value) { this.ownText = String(value); this.children = []; }
+    get textContent() { return this.ownText + this.children.map(child => child.textContent).join(""); }
     addEventListener(event, fn) { this.listeners[event] = fn; }
     getBoundingClientRect() { return { left: 20, bottom: 80 }; }
   }
@@ -36,9 +40,19 @@ async function mount(testResponse = { ok: true }) {
       : url === "/api/models" ? { models: [{ id: "test/model", name: "Test Model", providerID: "test" }] }
         : url === "/api/models/test" ? testResponse : [] };
   };
-  const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8").replace('import "./style.css";', "");
+  const safeDomSource = fs.readFileSync(new URL("../web/safe-dom.ts", import.meta.url), "utf8");
+  const safeDomJs = ts.transpileModule(safeDomSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  const safeDomModule = { exports: {} };
+  vm.runInNewContext(safeDomJs, { module: safeDomModule, exports: safeDomModule.exports });
+  const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8")
+    .replace('import "./style.css";', "")
+    .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+  const mainModule = { exports: {} };
   vm.runInNewContext(js, {
+    module: mainModule, exports: mainModule.exports,
+    renderJobSummary: safeDomModule.exports.renderJobSummary,
+    renderModelTooltip: safeDomModule.exports.renderModelTooltip,
     document, fetch, window: { innerWidth: 1000, scrollY: 0 },
     Option: class extends Element { constructor(text, value) { super("option"); this.textContent = text; this.value = value; } },
     setInterval: () => 0,
@@ -68,7 +82,7 @@ test("common model tooltip appears on hover/focus and hides on exit", async () =
   assert.equal(typeof select.listeners.mouseenter, "function", "Missing common-model tooltip");
   select.listeners.mouseenter();
   assert.equal(tooltip.style.display, "block");
-  assert.match(tooltip.innerHTML, /test\/model/);
+  assert.match(tooltip.textContent, /test\/model/);
   select.listeners.mouseleave();
   assert.equal(tooltip.style.display, "none");
   select.listeners.focus();

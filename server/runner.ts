@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { resolveProjectFile } from "./project-security.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECTS = path.join(ROOT, "projects");
@@ -14,10 +15,15 @@ const runners = new Map<string, Runner>();
 function safeProjectPath(input: string): string | null {
   if (!input) return null;
   const dir = path.resolve(PROJECTS, path.basename(input));
-  if (!dir.startsWith(PROJECTS + path.sep)) return null;
-  try { if (!fs.statSync(dir).isDirectory()) return null; }
+  try {
+    const projectsRoot = fs.realpathSync(PROJECTS);
+    const realDir = fs.realpathSync(dir);
+    const relative = path.relative(projectsRoot, realDir);
+    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    if (!fs.statSync(realDir).isDirectory()) return null;
+    return realDir;
+  }
   catch { return null; }
-  return dir;
 }
 
 function killTree(proc: ChildProcess) {
@@ -155,14 +161,16 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
   // Static project file serving
   if (u.pathname.startsWith("/preview-static/")) {
     const parts = u.pathname.split("/").filter(Boolean);
-    const slug = parts.length > 1 ? safeProjectPath(parts[1]) : null;
-    if (!slug) { reply(404, { error: "No encontrado" }); return true; }
-    const rest = parts.slice(2).join("/");
-    let filePath = path.resolve(slug, rest || "index.html");
-    if (!filePath.startsWith(slug)) { reply(403, { error: "Ruta prohibida" }); return true; }
-    try {
-      if (fs.statSync(filePath).isDirectory()) filePath = path.join(filePath, "index.html");
-    } catch { reply(404, { error: "No encontrado" }); return true; }
+    let projectName: string;
+    try { projectName = parts.length > 1 ? decodeURIComponent(parts[1]) : ""; }
+    catch { reply(404, { error: "No encontrado" }); return true; }
+    if (!projectName || /[\\/\0]/.test(projectName)) { reply(404, { error: "No encontrado" }); return true; }
+    const projectRoot = safeProjectPath(projectName);
+    if (!projectRoot) { reply(404, { error: "No encontrado" }); return true; }
+    const encodedRelativePath = parts.slice(2).join("/") || "index.html";
+    const resolvedFile = resolveProjectFile(projectRoot, encodedRelativePath);
+    if (!resolvedFile) { reply(404, { error: "No encontrado" }); return true; }
+    const filePath = resolvedFile.absolutePath;
     try {
       const data = fs.readFileSync(filePath);
       const ext = path.extname(filePath).toLowerCase();

@@ -1,54 +1,73 @@
-# PROFESSIONAL.md - Informe profesional de estado y trabajo pendiente
-# Taridev Software Factory 2.0 (proyecto local C:\Projects\Dev\DevFactory)
+# DevFactory 2.0 — estado profesional
 
-## 1. Objetivo
-Evolucionar DevFactory a un asistente/fabrica autonoma de software estable sobre el stack actual (Node.js, TypeScript, Vite), iniciando desde el codigo existente sin reescribir desde cero.
+## Objetivo
 
-## 2. Alcance implementado realmente (verificado con comprobaciones)
-### Backend (server/index.ts y modulos auxiliares)
-- Modelos: GET /api/models (parse de opencode models --verbose), POST /api/models/test (prueba con timeout y deteccion de cuota/credenciales).
-- Jobs con ciclo: queued/running/done/failed/cancelled + needs_intervention/validated.
-- Pipeline con fase brain (STATIC / SIMPLE / COMPLEJA) para decidir etapas.
-- Autocorreccion limitada (<=3 intentos) con verifyProject (npm install/build/test) y mensajes de error claros.
-- Delivery Manager: genera DELIVERY_REPORT.md.
-- Preview: start/stop/status y static serving (/preview-static/:slug/*).
-- ZIP: GET /api/projects/zip?directory=<slug> con exclusiones seguras.
-- Persistencia basica (data/jobs.json, data/settings.json), cancelacion, reintento, borrado, modificacion de proyecto existente con checkpoint.
-- Seguridad: validacion de rutas, tree-kill de procesos, argumentos estructurados.
+Evolucionar la fábrica local de software sin reescribir el producto existente. Stack: Node.js, TypeScript, Vite y OpenCode CLI. Sigue siendo una aplicación local de un único proceso; no es un servicio distribuido.
 
-### Frontend historico perdido en intentos de cuadrar sintaxis
-- La interfaz quedo reducida a un esqueleto minimo por un incidente de sintaxis en web/main.ts durante la integracion de cambios masivos.
-- La interfaz queda en Estructura minima valid para build; las paneras/tablas han sido substituidas parcialmente.
-- TODO: restauracion completa del UI (selectores, tooltip, jobs, logs, preview, botones).
+## Estado verificado
 
-### Incidente de datos
-- Se borraron accidentalmente jobs/model-tests/settings en un momento mientras se intentaba limpiar archivos temporales. settings reinicializado a defaults (autoApprove:false). Los proyectos permanecen en projects/.
+La revisión actual se hizo en el worktree `high-priority-hardening`, derivado del commit `66bfce5` de `main`. El código rastreado de `main` permanece en ese commit; los documentos de diseño/plan se conservan sin seguimiento en el checkout original. Las prioridades altas A–D de abajo están implementadas en el worktree y pasan las verificaciones registradas en `QA_REPORT.md`; todavía no se integraron a `main`.
 
-## 3. Arquitectura principal
-- API Node/TS (server/index.ts), worker secuencial, spawn OpenCode, prematureesescuencias persistidas.
-- UI Vite (`web/`), proxy `/api` → 127.0.0.1:4177.
-- Directorios: data/ (jobs, settings, logs, zips), projects/<slug>-id/.
+### Producto existente
 
-## 4. Tareas pendientes (PROFESSIONAL PLAN)
-### Fase A – Restauracion de Frontend (prioridad 1)
-- Recrear contenedor completo (settings panel con toggles, mode common/independent, autoApprove warning).
-- Restaurar selects, tooltips de modelo, panel de preview y acciones de jobs.
+- UI con configuración de modelos por agente, botón de prueba y tooltip; trabajos con logs/acciones; formulario de creación/modificación; preview y ZIP.
+- Pipeline brain `STATIC` / `SIMPLE` / `COMPLEJA`, worker persistido, cancelación, corrección acotada y Delivery Manager.
+- Preview estático/dinámico, ZIP y checkpoint al modificar proyectos.
 
-### Fase B – Seguridad y calidad
-- Definir pruebas unitarias/integracion en backend y frontend.
-- Rate-limits y validacion mas estricta.
-- Escanear secretos antes de ZIP.
+### Prioridad A — exclusión del worker y cancelación: completada
 
-### Fase C – Integracion
-- Reanudar proyecto, ciclo QA/Developer automatizado completo, pruebas E2E por CLI.
-- Logging mas fino y cancelacion granular.
+- Lease cubre todo el worker y mantiene el procesamiento serial FIFO.
+- Procesos de validación, brain, agentes y npm se registran por trabajo; la cancelación no convierte el resultado en `failed`.
+- El worker espera el cierre de los hijos después de cancelar o terminar por timeout antes de liberar el lease.
+- Retry no inicia una nueva ejecución mientras la anterior conserve procesos registrados; el test Windows comprueba terminación real de padre e hijo.
 
-## 5. Restricciones operativas actuales
-- No se hicieron despliegues ni push.
-- README actualizado con los ultimos cambios.
-- No se modifiquen archivos fuera de los ya creados/modificados descritos.
+### Prioridad B — validación técnica: completada
 
-## 6. Instrucciones para revisar
-- Compilacion: `npm run build` deberia pasar.
-- Arranque: `npm run dev` (API + Vite).
-- Salud: http://127.0.0.1:4177/api/health
+- Static requiere `index.html` y se califica como verificación superficial.
+- Package requiere al menos `build` o `test`; ejecuta todos los configurados. Ausencia, JSON inválido o fallo de comando no pasan.
+- Resumen real se agrega a `QA_REPORT.md` sin volcar la salida cruda del proceso.
+- `index.html` debe ser archivo regular; resultados QA son estructurados y no se infieren de la salida cruda.
+
+### Prioridad C — entrega validada: completada
+
+- Agente local `delivery-manager` y contrato de cinco secciones completas en `DELIVERY_REPORT.md`.
+- Estado `validated` exige salida exitosa, archivo actualizado durante esa fase y secciones con contenido. Un fallo queda visible como `failed`; no se borra el informe anterior.
+- La frescura se verifica comparando mtime y estado previo, para rechazar informes antiguos con fechas futuras.
+
+### Prioridad D — seguridad ZIP/preview/UI: completada
+
+- ZIP bloquea rutas de credenciales y patrones de secreto de alta confianza; límites del escáner: 20 000 entradas, 1 MiB por archivo y 50 MiB total.
+- El ZIP usa un snapshot de los bytes inspeccionados; roots junction fuera de `projects/` se rechazan.
+- Preview estático rechaza archivos sensibles, traversal y symlinks que salen del proyecto.
+- Resumen de trabajos y tooltip usan creación de nodos/texto; metadata del proyecto no se interpreta como HTML.
+
+## Pendientes
+
+### Prioridad media
+
+1. Añadir proxy `/preview-static` en Vite: actualmente `vite.config.ts` solo proxya `/api`, por lo que preview estático durante `npm run dev` puede fallar desde el origen del frontend.
+2. Consultar `/api/preview/status` desde la UI para refrescar estado y logs; comprobar también que el proceso dinámico realmente abrió el puerto antes de informar éxito.
+3. Alinear reintento de `needs_intervention`: la UI ofrece acción, pero el backend actualmente acepta reintento solo desde `failed` o `cancelled`.
+4. Añadir una acción de restauración desde checkpoint; hoy se crea checkpoint, pero no existe flujo de recuperación desde la UI.
+5. Mejorar errores de red/HTTP de los controles del frontend para que no fallen silenciosamente.
+
+### Prioridad posterior
+
+- Pruebas E2E del ciclo completo con un proveedor OpenCode real; las pruebas actuales no consumen cuota ni autentican contra modelos.
+- Pruebas de carga/concurrencia prolongadas con procesos reales en Windows.
+- Autenticación y rate-limit si en algún momento se expone la API fuera de localhost; actualmente no debe exponerse a Internet.
+- Mejorar persistencia/backup y recuperación de `data/jobs.json`/`settings.json`.
+- La inspección de ZIP es conservadora y basada en nombres y fingerprints conocidos; no garantiza detectar todos los secretos. Revisar manualmente proyectos con credenciales.
+
+## QA de esta revisión
+
+- `npm test`: 62/62 PASS.
+- `npm run build`: PASS.
+- `git diff --check`: sin errores; solo avisos de conversión de fin de línea LF/CRLF de Windows.
+- Informe detallado y límites: `QA_REPORT.md`.
+
+## Operación y seguridad
+
+- Arranque local: `npm install && npm run dev`; UI `http://127.0.0.1:5173`, API `http://127.0.0.1:4177`.
+- No se leyeron credenciales ni se ejecutó push/deploy.
+- Los cambios están aislados en el worktree y rama `high-priority-hardening`; no se crearon commits ni se modificó `main`.

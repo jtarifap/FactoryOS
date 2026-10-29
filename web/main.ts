@@ -1,4 +1,5 @@
 ﻿import "./style.css";
+import { renderJobSummary, renderModelTooltip } from "./safe-dom";
 
 type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager";
 type Job = {
@@ -72,10 +73,7 @@ function setTooltipForModel(select: HTMLSelectElement) {
   const show = () => {
     const model = state.models.find(m => m.id === select.value);
     if (!model) return;
-    tooltip.innerHTML = `<strong>${model.name || model.id}</strong>`
-      + `<div class="tt-row"><b>ID</b><span>${model.id}</span></div>`
-      + `<div class="tt-row"><b>Proveedor</b><span>${model.providerID || "-"}</span></div>`
-      + `<div class="tt-row"><b>Estado</b><span>${model.status || "-"}</span></div>`;
+    renderModelTooltip(document, tooltip, model);
     const r = select.getBoundingClientRect();
     tooltip.style.display = "block";
     tooltip.style.left = `${Math.min(r.left, window.innerWidth - 360)}px`;
@@ -103,7 +101,8 @@ function fillModelSelect(select: HTMLSelectElement, selected: string) {
     for (const model of items) {
       const opt = document.createElement("option");
       opt.value = model.id;
-      const suffix = state.settings?.modelStatus?.[model.id] === "no-results" ? " ⚠" : "";
+      const suffix = state.settings?.modelStatus?.[model.id] === "no-results" ? " ⚠" :
+                    state.settings?.modelStatus?.[model.id] === "ok" ? " ✔" : "";
       opt.textContent = `${model.name || model.id}${suffix}`;
       if (model.id === selected) opt.selected = true;
       group.appendChild(opt);
@@ -170,6 +169,7 @@ function buildSettingsUI(): HTMLElement {
       els.settingsFeedback.textContent = r.ok && data.ok
         ? `OK: modelo común -> ${model}`
         : `Fallo: ${data.error || model}`;
+      await loadSettings();
     } catch (error) {
       els.settingsFeedback.textContent = `Error al probar el modelo común: ${String(error)}`;
     } finally {
@@ -440,6 +440,16 @@ async function loadSettings() {
   const r = await fetch("/api/settings");
   const data = await r.json();
   state.settings = data as Settings;
+  const preservedSelections = [
+    "common-model",
+    "model-factory-manager",
+    "model-developer",
+    "model-qa-reviewer",
+    "model-delivery-manager",
+  ].map(id => ({
+    id,
+    value: (document.getElementById(id) as HTMLSelectElement | null)?.value ?? "",
+  }));
   const mode = qs<HTMLSelectElement>("#mode");
   const common = qs<HTMLSelectElement>("#common-model");
   const auto = qs<HTMLInputElement>("#auto-approve");
@@ -450,6 +460,10 @@ async function loadSettings() {
   grid.hidden = state.settings.mode === "common";
   (document.getElementById("auto-approve-warning") as HTMLElement).hidden = auto.checked;
   if (state.models.length) populateAllModelSelects();
+  for (const { id, value } of preservedSelections) {
+    const select = document.getElementById(id) as HTMLSelectElement | null;
+    if (select && value && Array.from(select.options).some(option => option.value === value)) select.value = value;
+  }
 }
 
 function populateAllModelSelects() {
@@ -479,8 +493,7 @@ async function loadJobs() {
 
   for (const job of jobs) {
     const card = document.createElement("article");
-    const top = document.createElement("div");
-    top.innerHTML = `<strong>${job.name}</strong> <span class="status status-${job.status}">${job.status}</span> · ${job.phase}`;
+    const top = renderJobSummary(document, job);
     card.appendChild(top);
 
     const meta = create("small", `ID: ${job.id} · Actualizado: ${job.updatedAt}`);

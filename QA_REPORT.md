@@ -66,7 +66,9 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - Se regeneró `public/images/captApp2.jpg` (1091×837) con el modo «Independientes por agente» ya corregido: sin «Modelo común / fallback» y con los selectores por agente visibles. Las tres capturas del README se muestran a 250 px de ancho.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).
 
-## Tema claro/oscuro (2026-10-30)
+## Tema claro/oscuro (landing) (2026-10-30)
+
+- Añadido botón sol/luna detrás de "GitHub" en `index.html`, con tema claro/oscuro compartido (`factoryos-theme`), persistencia y funcionamiento .
 
 - `npm test`: **88/88 PASS**; incluye pruebas de preferencia predeterminada oscura, persistencia, alternancia, accesibilidad del icono y su posición justo antes de «LOCAL / WINDOWS».
 - `npm run build`: **PASS** (`tsc --noEmit` + Vite build).

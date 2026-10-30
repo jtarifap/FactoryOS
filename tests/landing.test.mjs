@@ -45,6 +45,11 @@ test("vite declara la landing y la app como entradas de build", () => {
   assert.match(config, /web\/app\.html/);
 });
 
+test("el logo y el nombre comparten la misma alineación", () => {
+  assert.match(read("../web/index.html"), /viewBox="0 11 64 64"/);
+  assert.match(read("../web/main.ts"), /viewBox="0 11 64 64"/);
+});
+
 test("los enlaces de la landing apuntan a destinos reales", () => {
   const html = read("../web/index.html");
   assert.ok(!html.includes('href="#"'), "quedan enlaces muertos en la portada");

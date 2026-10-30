@@ -54,11 +54,13 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - `web/index.html` es la landing estática (antes en `projects/web-estatica-landing-page-de-factoryos-ef57418e`), con estilos en `web/landing.css`; el panel de FactoryOS pasa a `web/app.html`.
 - Los botones **Empezar** y **Crear mi primer proyecto** navegan a `/app.html`; el logo del panel vuelve a `/`.
 - `vite.config.ts` declara ambas páginas como entradas; en desarrollo `npm run dev` sirve `/` y `/app.html`.
-- `npm test`: **72/72 PASS** (incluye `tests/landing.test.mjs`, 10 pruebas nuevas).
+- `npm test`: **76/76 PASS** (incluye `tests/landing.test.mjs` y las pruebas de visibilidad del modo de selección).
 - `npm run build`: **PASS**; genera `dist/index.html` (landing), `dist/app.html` (panel) y assets con hash.
 - Comprobación manual con Vite en `127.0.0.1:5173`: `/` responde 200 con `landing.css` y sin `/main.ts`; `/app.html` responde 200 con `/main.ts`.
 - Revisión final: se corrigió el contraste de los CTA en hover (`.cta:hover`) y los enlaces muertos de Docs/GitHub, que ahora apuntan al repositorio real. Las pruebas cubren ambas regresiones y que `vite.config.ts` declare las dos entradas.
 - Se alineó verticalmente el logo con el nombre FactoryOS en la landing y el panel (mismo `viewBox`), con prueba de regresión.
 - Repositorio y enlaces actualizados a `github.com/jtarifap/FactoryOS`; el remoto `origin` apunta a la nueva URL y `git ls-remote` responde en `main`.
 - Se eliminó la línea descriptiva «Agentes OpenCode · Brain STATIC/SIMPLE/COMPLEJA · Preview local · ZIP · Modificación» del header del panel.
+- En modo «Independientes por agente» se oculta «Modelo común / fallback» y se muestran los agentes; en «Modelo común» ocurre lo contrario. Se añadió la regla CSS `#common-model-section[hidden]` y pruebas de ambos modos.
+- Se estabilizó la prueba de frescura de `DELIVERY_REPORT.md` (margen de 1 s) para evitar falsos rojos por resolución de mtime.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).

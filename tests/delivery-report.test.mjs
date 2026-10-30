@@ -60,7 +60,7 @@ test("report is fresh only when a non-empty file was updated after phase start",
     const oldTime = new Date(Date.now() - 10_000);
     fs.utimesSync(report, oldTime, oldTime);
     const before = captureDeliveryReportState(directory);
-    const phaseStart = BigInt(Date.now()) * 1_000_000n;
+    const phaseStart = BigInt(Date.now() - 1_000) * 1_000_000n;
     fs.writeFileSync(report, "new report written in phase");
     assert.equal(wasDeliveryReportUpdatedSince(directory, phaseStart, before), true);
     fs.writeFileSync(report, "");

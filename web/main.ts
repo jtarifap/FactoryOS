@@ -180,6 +180,8 @@ function buildSettingsUI(): HTMLElement {
   commonRow.appendChild(commonSelect);
   commonRow.appendChild(commonTest);
   commonLabel.appendChild(commonRow);
+  commonLabel.id = "common-model-section";
+  commonLabel.hidden = modeSelect.value === "independent";
   els.settingsBody.appendChild(commonLabel);
 
   const grid = document.createElement("div");
@@ -274,7 +276,9 @@ function buildSettingsUI(): HTMLElement {
   els.settingsBody.appendChild(els.settingsFeedback);
 
   modeSelect.onchange = () => {
-    grid.hidden = modeSelect.value === "common";
+    const isCommon = modeSelect.value === "common";
+    commonLabel.hidden = !isCommon;
+    grid.hidden = isCommon;
   };
   autoCheck.onchange = () => {
     warning.hidden = autoCheck.checked;
@@ -483,6 +487,8 @@ async function loadSettings() {
   common.value = state.settings.commonModel;
   auto.checked = !!state.settings.autoApprove;
   grid.hidden = state.settings.mode === "common";
+  const commonSection = document.getElementById("common-model-section") as HTMLElement | null;
+  if (commonSection) commonSection.hidden = state.settings.mode === "independent";
   (document.getElementById("auto-approve-warning") as HTMLElement).hidden = auto.checked;
   if (state.models.length) populateAllModelSelects();
   for (const { id, value } of preservedSelections) {

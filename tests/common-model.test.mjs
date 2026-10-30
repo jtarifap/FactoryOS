@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 
 // Minimal DOM and HTTP boundary: execute the actual UI without calling paid models.
-async function mount(testResponse = { ok: true }) {
+async function mount(testResponse = { ok: true }, mode = "common") {
   const elements = [];
   class Element {
     children = []; style = {}; dataset = {}; listeners = {}; ownText = "";
@@ -30,7 +30,7 @@ async function mount(testResponse = { ok: true }) {
   };
   const calls = [];
   const settings = {
-    mode: "common", commonModel: "test/model", autoApprove: false,
+    mode, commonModel: "test/model", autoApprove: false,
     agentModels: Object.fromEntries(["factory-manager", "developer", "qa-reviewer", "delivery-manager"].map(id => [id, "test/model"])),
   };
   const fetch = async (url, options) => {
@@ -98,4 +98,45 @@ test("common model test reports connection errors and restores button", async ()
   assert.equal(button.disabled, false);
   assert.equal(button.textContent, "Probar");
   assert.ok(elements.some(el => el.textContent.includes("Sin conexión")));
+});
+
+test("modo común muestra el modelo común y oculta los agentes", async () => {
+  const { elements } = await mount();
+  const commonSection = elements.find(el => el.id === "common-model-section");
+  const grid = elements.find(el => el.className === "agent-grid");
+  assert.ok(commonSection, "Missing common model section");
+  assert.ok(grid, "Missing agent grid");
+  assert.equal(commonSection.hidden, false);
+  assert.equal(grid.hidden, true);
+});
+
+test("modo independiente oculta el modelo común y muestra los agentes", async () => {
+  const { elements } = await mount({ ok: true }, "independent");
+  const commonSection = elements.find(el => el.id === "common-model-section");
+  const grid = elements.find(el => el.className === "agent-grid");
+  assert.ok(commonSection, "Missing common model section");
+  assert.ok(grid, "Missing agent grid");
+  assert.equal(commonSection.hidden, true);
+  assert.equal(grid.hidden, false);
+});
+
+test("cambiar el modo alterna la visibilidad de ambas secciones", async () => {
+  const { elements } = await mount();
+  const mode = elements.find(el => el.id === "mode");
+  const commonSection = elements.find(el => el.id === "common-model-section");
+  const grid = elements.find(el => el.className === "agent-grid");
+  assert.ok(mode && commonSection && grid, "Missing settings controls");
+  mode.value = "independent";
+  mode.onchange();
+  assert.equal(commonSection.hidden, true);
+  assert.equal(grid.hidden, false);
+  mode.value = "common";
+  mode.onchange();
+  assert.equal(commonSection.hidden, false);
+  assert.equal(grid.hidden, true);
+});
+
+test("el CSS respeta hidden en la sección de modelo común", async () => {
+  const css = fs.readFileSync(new URL("../web/style.css", import.meta.url), "utf8");
+  assert.match(css, /#common-model-section\[hidden\]\s*\{[^}]*display\s*:\s*none/);
 });

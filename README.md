@@ -28,6 +28,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/index.html` + `web/landing.css`: landing estática en `/`.
 - `web/app.html` + `web/main.ts`: panel de FactoryOS en `/app.html`.
 - Los botones **Empezar** y **Crear mi primer proyecto** de la landing abren el panel; el logo del panel vuelve a la landing.
+- Tema claro/oscuro: botón sol/luna junto a **LOCAL / WINDOWS** en el panel y después de **GitHub** en la landing, con persistencia en `localStorage` y oscuro por defecto.
 - `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`.
 
 ## Funcionamiento

@@ -1,5 +1,6 @@
 ﻿import "./style.css";
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
+import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
 
 type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager";
 type Job = {
@@ -25,6 +26,14 @@ type Settings = {
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
+let activeTheme: Theme;
+try {
+  activeTheme = readTheme(window.localStorage);
+} catch {
+  activeTheme = "dark";
+}
+document.documentElement.dataset.theme = activeTheme;
+
 const tooltip = document.createElement("div");
 tooltip.id = "model-tooltip";
 document.body.appendChild(tooltip);
@@ -460,10 +469,39 @@ function renderHeader(): HTMLElement {
   name.innerHTML = "Factory<span>OS</span>";
   brand.appendChild(name);
   left.appendChild(brand);
+
+  const themeToggle = create("button");
+  themeToggle.type = "button";
+  themeToggle.className = "secondary theme-toggle";
+  const updateThemeToggle = () => {
+    const nextTheme = toggleTheme(activeTheme);
+    const action = nextTheme === "light" ? "claro" : "oscuro";
+    themeToggle.setAttribute("aria-label", `Cambiar a tema ${action}`);
+    themeToggle.title = `Cambiar a tema ${action}`;
+    themeToggle.innerHTML = nextTheme === "light"
+      ? '<svg data-icon="sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path></svg>'
+      : '<svg data-icon="moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z"></path></svg>';
+  };
+  updateThemeToggle();
+  themeToggle.onclick = () => {
+    activeTheme = toggleTheme(activeTheme);
+    document.documentElement.dataset.theme = activeTheme;
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, activeTheme);
+    } catch {
+      // Keep the in-session theme switch working when browser storage is unavailable.
+    }
+    updateThemeToggle();
+  };
+
   const badge = create("span", "Local / Windows");
   badge.className = "chip";
+  const statusGroup = create("div");
+  statusGroup.className = "header-status-group";
+  statusGroup.appendChild(themeToggle);
+  statusGroup.appendChild(badge);
   header.appendChild(left);
-  header.appendChild(badge);
+  header.appendChild(statusGroup);
   return header;
 }
 

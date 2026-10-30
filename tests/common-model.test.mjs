@@ -8,25 +8,33 @@ import ts from "typescript";
 async function mount(testResponse = { ok: true }, mode = "common") {
   const elements = [];
   class Element {
-    children = []; style = {}; dataset = {}; listeners = {}; ownText = "";
+    children = []; style = {}; dataset = {}; listeners = {}; attributes = {}; ownText = "";
     value = ""; disabled = false;
     constructor(tag) { this.tagName = tag; elements.push(this); }
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
     append(...children) { children.forEach(child => this.appendChild(child)); }
     replaceChildren(...children) { this.children = []; this.ownText = ""; this.append(...children); }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
     set textContent(value) { this.ownText = String(value); this.children = []; }
     get textContent() { return this.ownText + this.children.map(child => child.textContent).join(""); }
     addEventListener(event, fn) { this.listeners[event] = fn; }
     getBoundingClientRect() { return { left: 20, bottom: 80 }; }
   }
   const app = new Element("div"); app.id = "app";
+  const root = new Element("html");
   const document = {
+    documentElement: root,
     body: new Element("body"),
     createElement: tag => new Element(tag),
     getElementById: id => elements.find(el => el.id === id),
     querySelector: selector => elements.find(el => selector.startsWith("#")
       ? el.id === selector.slice(1) : selector.startsWith(".")
         ? el.className === selector.slice(1) : false) || null,
+  };
+  let savedTheme = null;
+  const storage = {
+    getItem: () => savedTheme,
+    setItem: (_key, value) => { savedTheme = value; },
   };
   const calls = [];
   const settings = {
@@ -55,21 +63,26 @@ async function mount(testResponse = { ok: true }, mode = "common") {
   vm.runInNewContext(safeDomJs, { module: safeDomModule, exports: safeDomModule.exports });
   const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8")
     .replace('import "./style.css";', "")
-    .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "");
+    .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "")
+    .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "");
+  const themeModule = await import("../web/theme.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const mainModule = { exports: {} };
   vm.runInNewContext(js, {
     module: mainModule, exports: mainModule.exports,
     renderJobSummary: safeDomModule.exports.renderJobSummary,
     renderModelTooltip: safeDomModule.exports.renderModelTooltip,
-    document, fetch, window: { innerWidth: 1000, scrollY: 0 },
+    readTheme: themeModule.readTheme,
+    THEME_STORAGE_KEY: themeModule.THEME_STORAGE_KEY,
+    toggleTheme: themeModule.toggleTheme,
+    document, fetch, window: { innerWidth: 1000, scrollY: 0, localStorage: storage },
     Option: class extends Element { constructor(text, value) { super("option"); this.textContent = text; this.value = value; } },
     setInterval: () => 0,
   });
   await new Promise(resolve => setImmediate(resolve));
   const select = document.getElementById("common-model");
   const button = select.parentElement.children.find(el => el.tagName === "button");
-  return { select, button, calls, settings, tooltip: document.getElementById("model-tooltip"), elements };
+  return { select, button, calls, settings, tooltip: document.getElementById("model-tooltip"), elements, document, storage };
 }
 
 test("common model has a working Probar button using the selected model", async () => {
@@ -182,4 +195,32 @@ test("guardar en modo independiente conserva los modelos por agente", async () =
   assert.equal(settings.agentModels.developer, "test/other");
   assert.equal(settings.agentModels["factory-manager"], "test/model");
   assert.equal(elements.find(el => el.id === "model-developer").value, "test/other");
+});
+
+test("theme toggle updates the root theme, saved preference and accessible icon", async () => {
+  const { document, elements, storage } = await mount();
+  const button = elements.find(el => el.className === "secondary theme-toggle");
+  assert.ok(button, "Missing theme toggle");
+  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(button.attributes["aria-label"], "Cambiar a tema claro");
+  assert.match(button.innerHTML, /data-icon="sun"/);
+
+  button.onclick();
+
+  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(storage.getItem("factoryos-theme"), "light");
+  assert.equal(button.attributes["aria-label"], "Cambiar a tema oscuro");
+  assert.match(button.innerHTML, /data-icon="moon"/);
+});
+
+test("theme toggle sits immediately before the Local / Windows badge", async () => {
+  const { elements } = await mount();
+  const header = elements.find(el => el.tagName === "header");
+  const statusGroup = elements.find(el => el.className === "header-status-group");
+  const toggle = elements.find(el => el.className === "secondary theme-toggle");
+  const badge = elements.find(el => el.className === "chip");
+
+  assert.ok(statusGroup, "Missing header status group");
+  assert.equal(header.children[1], statusGroup);
+  assert.deepEqual(statusGroup.children, [toggle, badge]);
 });

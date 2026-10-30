@@ -65,3 +65,10 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - Se estabilizó la prueba de frescura de `DELIVERY_REPORT.md` (margen de 1 s) para evitar falsos rojos por resolución de mtime.
 - Se regeneró `public/images/captApp2.jpg` (1091×837) con el modo «Independientes por agente» ya corregido: sin «Modelo común / fallback» y con los selectores por agente visibles. Las tres capturas del README se muestran a 250 px de ancho.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).
+
+## Tema claro/oscuro (2026-10-30)
+
+- `npm test`: **88/88 PASS**; incluye pruebas de preferencia predeterminada oscura, persistencia, alternancia, accesibilidad del icono y su posición justo antes de «LOCAL / WINDOWS».
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- Verificación manual en navegador: ambas paletas, tema oscuro inicial sin preferencia guardada, persistencia tras recargar, icono/etiqueta dinámicos y foco de teclado visibles.
+- Sin nuevas dependencias; la preferencia se guarda solo en `localStorage`.

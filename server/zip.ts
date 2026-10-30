@@ -1,4 +1,4 @@
-Ôªøimport http from "node:http";
+import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -10,6 +10,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECTS = path.join(ROOT, "projects");
 const DATA = path.join(ROOT, "data");
 const ZIPS = path.join(DATA, "zips");
+
+function hasFiles(dir: string): boolean {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile()) return true;
+    if (entry.isDirectory() && hasFiles(path.join(dir, entry.name))) return true;
+  }
+  return false;
+}
 
 function safeProjectPath(input: string): string | null {
   if (!input) return null;
@@ -51,7 +60,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
   // GET /api/projects/zip?directory=<name> -> generate (if needed) and stream.
   if (u.pathname === "/api/projects/zip" && req.method === "GET") {
     const dir = safeProjectPath(String(u.searchParams.get("directory") || ""));
-    if (!dir) { reply(400, { error: "Directorio inv√°lido" }); return true; }
+    if (!dir) { reply(400, { error: "Directorio inv·lido" }); return true; }
     fs.mkdirSync(ZIPS, { recursive: true });
     const snapshotDir = path.join(ZIPS, `.scan-${randomUUID()}`);
     try {
@@ -59,7 +68,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
       try { candidates = createScannedSnapshot(dir, snapshotDir); }
       catch (error) {
         if (error instanceof ProjectScanLimitError) { reply(422, { error: error.message }); return true; }
-        reply(500, { error: "No se pudo completar la inspecci√≥n de seguridad; no se cre√≥ el ZIP." });
+        reply(500, { error: "No se pudo completar la inspecciÛn de seguridad; no se creÛ el ZIP." });
         return true;
       }
       if (candidates.length) {
@@ -67,6 +76,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
         return true;
       }
       const out = path.join(ZIPS, `${path.basename(dir)}.zip`);
+      if (!hasFiles(snapshotDir)) { reply(422, { error: "El proyecto esta vacio o no contiene archivos exportables." }); fs.rmSync(snapshotDir, { recursive: true, force: true }); return true; }
       const r = await createZip(snapshotDir, out);
       if (!r.ok) { reply(500, { error: `No se pudo crear el ZIP: ${r.error || "error desconocido"}` }); return true; }
       const stat = fs.statSync(out);

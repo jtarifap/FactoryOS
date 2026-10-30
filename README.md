@@ -12,13 +12,20 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 
 1. Ejecuta `npm install` en esta carpeta.
 2. Abre una terminal y ejecuta `npm run dev`.
-3. Visita **http://127.0.0.1:5173**.
+3. Visita **http://127.0.0.1:5173**: verás la landing. Pulsa **Empezar** para abrir el panel de FactoryOS en **/app.html**.
 4. Crea un proyecto de prueba pequeno. Los proyectos se crean en `projects/`.
+
+## Interfaz web
+
+- `web/index.html` + `web/landing.css`: landing estática en `/`.
+- `web/app.html` + `web/main.ts`: panel de FactoryOS en `/app.html`.
+- Los botones **Empezar** y **Crear mi primer proyecto** de la landing abren el panel; el logo del panel vuelve a la landing.
+- `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`.
 
 ## Funcionamiento
 
 - API Node.js/TypeScript en 127.0.0.1:4177.
-- Interfaz Vite/TypeScript en 127.0.0.1:5173.
+- Interfaz Vite/TypeScript en 127.0.0.1:5173: `/` sirve la landing estática (`web/index.html` + `web/landing.css`) y `/app.html` el panel de FactoryOS (`web/main.ts`).
 - Cola persistida en `data/jobs.json`, un trabajo a la vez.
 - Worker con exclusión durante todo el ciclo y cancelación por árbol de procesos en todas las fases; un trabajo cancelado no se convierte en `failed` al cerrar. La cola conserva su orden.
 - Fases segun complejidad:
@@ -66,6 +73,10 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 
 ## Estructura y QA
 
+- `web/`: landing (`index.html`, `landing.css`) y panel (`app.html`, `main.ts`, `style.css`).
+- `server/`: API Node.js/TypeScript.
+- `tests/`: pruebas de API, ZIP, preview y landing.
+- `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.
 - `QA_REPORT.md` se genera con evidencias reales (build/test).
 - `DELIVERY_REPORT.md` genera resumen de entrega.
@@ -83,7 +94,8 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 
 ## Prueba rapida
 
-- `npm run build` verifica TypeScript y construye la interfaz.
+- `npm run build` verifica TypeScript y construye la landing y el panel en `dist/`.
 - `npm test` ejecuta pruebas unitarias/regresión y handlers ZIP/preview con fixtures sintéticos; no llama a proveedores reales. En Windows, los tests de ZIP usan `tar.exe`.
+- `tests/landing.test.mjs` valida la landing: secciones, estilos y botones que abren `/app.html`.
 - `curl http://127.0.0.1:4177/api/health` comprueba la API mientras esta en ejecucion.
 - Crea un proyecto "hola mundo" desde DevFactory y observa logs/QA report.

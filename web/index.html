@@ -2,17 +2,131 @@
 <html lang="es">
 
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>FactoryOS</title>
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FactoryOS — fábrica autónoma de software</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="landing.css">
 </head>
 
 <body>
-    <div id="app"></div>
-    <script type="module" src="/main.ts"></script>
+  <header class="site-header">
+    <div class="brand">
+      <svg width="32" height="32" viewBox="0 0 64 64" role="img" aria-label="FactoryOS">
+        <path d="M8 54V32L22 22V32L36 22V32L50 22V54Z" fill="none" stroke="#ff9f1c" stroke-width="4"
+          stroke-linejoin="miter"></path>
+        <rect x="26" y="40" width="10" height="14" fill="#ff9f1c"></rect>
+      </svg>
+      <span class="brand-name">Factory<span class="accent">OS</span></span>
+    </div>
+    <nav class="site-nav" aria-label="Principal">
+      <a href="#agentes">Agentes</a>
+      <a href="#flujo">Flujo</a>
+      <a href="#docs">Docs</a>
+      <a href="#github">GitHub</a>
+    </nav>
+    <a class="cta" href="/app.html">Empezar</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="eyebrow">&gt; fábrica autónoma de software</div>
+        <h1>Describe la app.<br>FactoryOS la entrega.</h1>
+        <p class="lead">Un equipo de agentes de IA planifica, desarrolla, prueba, corrige y entrega aplicaciones de
+          forma automática, desde el terminal.</p>
+        <div class="terminal" role="img" aria-label="Ejemplo de uso en terminal">
+          <div><span class="prompt">$</span> factoryos run "CRM de clientes con login y panel"</div>
+          <div class="muted">planner · developer · tester · fixer · delivery</div>
+          <div class="accent-text">entregado: crm-clientes v0.1.0</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="agentes" class="section">
+      <h2>Agentes</h2>
+      <p class="section-lead">Cinco agentes especializados que trabajan en paralelo para convertir una idea en una
+        aplicación entregada.</p>
+      <div class="cards">
+        <article class="card">
+          <div class="card-num">01</div>
+          <h3>Planner</h3>
+          <p>Convierte la idea en backlog, arquitectura y tareas.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">02</div>
+          <h3>Developer</h3>
+          <p>Escribe el código por módulos, en paralelo.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">03</div>
+          <h3>Tester</h3>
+          <p>Genera y ejecuta pruebas, detecta regresiones.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">04</div>
+          <h3>Fixer</h3>
+          <p>Corrige los fallos y vuelve a probar hasta pasar.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">05</div>
+          <h3>Delivery</h3>
+          <p>Empaqueta, versiona y despliega la aplicación.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="flujo" class="section">
+      <h2>Cinco agentes, un solo flujo</h2>
+      <div class="flow" aria-label="Flujo de trabajo">
+        <span>Planner</span>
+        <span class="arrow">→</span>
+        <span>Developer</span>
+        <span class="arrow">→</span>
+        <span>Tester</span>
+        <span class="arrow">→</span>
+        <span>Fixer</span>
+        <span class="arrow">→</span>
+        <span>Delivery</span>
+      </div>
+    </section>
+
+    <section id="docs" class="section">
+      <h2>Docs</h2>
+      <p class="section-lead">Documentación y guías para empezar con FactoryOS.</p>
+      <ul class="doc-list">
+        <li><a href="https://github.com/jtarifap/DevFactory#iniciar">Guía de inicio rápido</a></li>
+        <li><a href="https://github.com/jtarifap/DevFactory#endpoints-principales">Referencia de comandos</a></li>
+        <li><a href="https://github.com/jtarifap/DevFactory#funcionamiento">Arquitectura de agentes</a></li>
+      </ul>
+    </section>
+
+    <section id="github" class="section">
+      <h2>GitHub</h2>
+      <p class="section-lead">Código fuente y contribuciones.</p>
+      <a class="cta" href="https://github.com/jtarifap/DevFactory" target="_blank" rel="noopener noreferrer">Ver en GitHub</a>
+    </section>
+
+    <section id="empezar" class="cta-section">
+      <div class="cta-box">
+        <div class="cta-title">Pon la fábrica a trabajar.</div>
+        <a class="cta" href="/app.html">Crear mi primer proyecto</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div data-dc-tpl="54"
+      style="border-top: 1px solid rgb(42, 44, 48); padding: 24px 48px; font-size: 13px; color: rgb(138, 143, 152); display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between;">
+      <span data-dc-tpl="55">FactoryOS · taridev</span><span data-dc-tpl="56">Esta web ha sido generada con <span
+          data-dc-tpl="57" style="color: rgb(255, 159, 28);">FactoryOS</span></span><span data-dc-tpl="58">con <span
+          data-dc-tpl="59" style="color: rgb(255, 159, 28);">opencode</span> en el núcleo</span>
+    </div>
+  </footer>
 </body>
 
 </html>

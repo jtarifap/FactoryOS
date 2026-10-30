@@ -424,10 +424,17 @@ function renderPreview(): HTMLElement {
 function renderHeader(): HTMLElement {
   const header = document.createElement("header");
   const left = document.createElement("div");
-  const h1 = document.createElement("h1");
-  h1.innerHTML = "Factory <em>2.0</em>";
+  const brand = document.createElement("div");
+  brand.className = "brand";
+  const svg = document.createElement("div");
+  svg.innerHTML = '<svg width="32" height="32" viewBox="0 0 64 64" role="img" aria-label="FactoryOS"><path d="M8 54V32L22 22V32L36 22V32L50 22V54Z" fill="none" stroke="#ff9f1c" stroke-width="4" stroke-linejoin="miter"></path><rect x="26" y="40" width="10" height="14" fill="#ff9f1c"></rect></svg>';
+  brand.appendChild(svg);
+  const name = document.createElement("span");
+  name.className = "brand-name";
+  name.innerHTML = "Factory<span>OS</span>";
+  brand.appendChild(name);
+  left.appendChild(brand);
   const lead = create("p", "Agentes OpenCode · Brain STATIC/SIMPLE/COMPLEJA · Preview local · ZIP · Modificación");
-  left.appendChild(h1);
   left.appendChild(lead);
   const badge = create("span", "Local / Windows");
   badge.className = "chip";

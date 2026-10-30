@@ -1,4 +1,4 @@
-# DevFactory 2.9 (alpha)
+# FactoryOS
 Fábrica autónoma de software con multiagentes IA para planificar, desarrollar, probar, corregir y entregar aplicaciones automáticamente.
 
 ## Requisitos

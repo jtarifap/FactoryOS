@@ -36,7 +36,9 @@ function safeProjectPath(input: string): string | null {
 
 function createZip(dir: string, outPath: string): Promise<{ ok: boolean; error?: string }> {
   return new Promise(resolve => {
-    const args = ["-a", "-cf", outPath, "-C", dir, "--exclude=node_modules", "--exclude=.git", "--exclude=.env", "--exclude=.env.*", "--exclude=.cache", "--exclude=*.log", "."];
+    const parent = path.dirname(dir);
+    const entry = path.basename(dir);
+    const args = ["-a", "-cf", outPath, "-C", parent, "--exclude=node_modules", "--exclude=.git", "--exclude=.env", "--exclude=.env.*", "--exclude=.cache", "--exclude=*.log", entry];
     const proc = spawn("C:\\\\Windows\\\\System32\\\\tar.exe", args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     proc.stdout.on("data", d => out += d.toString("utf8"));
@@ -45,7 +47,6 @@ function createZip(dir: string, outPath: string): Promise<{ ok: boolean; error?:
     proc.on("close", code => resolve({ ok: code === 0, error: code === 0 ? undefined : out.slice(-1000) }));
   });
 }
-
 async function readBody(req: http.IncomingMessage, limit = 3000): Promise<string | null> {
   let body = "";
   for await (const c of req) { body += c; if (body.length > limit) return null; }
@@ -61,8 +62,8 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
   if (u.pathname === "/api/projects/zip" && req.method === "GET") {
     const dir = safeProjectPath(String(u.searchParams.get("directory") || ""));
     if (!dir) { reply(400, { error: "Directorio inválido" }); return true; }
-    fs.mkdirSync(ZIPS, { recursive: true });
-    const snapshotDir = path.join(ZIPS, `.scan-${randomUUID()}`);
+    const snapshotParent = path.join(ZIPS, `.scan-${randomUUID()}`);
+    const snapshotDir = path.join(snapshotParent, path.basename(dir));
     try {
       let candidates: string[];
       try { candidates = createScannedSnapshot(dir, snapshotDir); }
@@ -76,7 +77,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
         return true;
       }
       const out = path.join(ZIPS, `${path.basename(dir)}.zip`);
-      if (!hasFiles(snapshotDir)) { reply(422, { error: "El proyecto esta vacio o no contiene archivos exportables." }); fs.rmSync(snapshotDir, { recursive: true, force: true }); return true; }
+      if (!hasFiles(snapshotDir)) { reply(422, { error: "El proyecto esta vacio o no contiene archivos exportables." }); fs.rmSync(snapshotDir, { recursive: true, force: true }); fs.rmSync(snapshotParent, { recursive: true, force: true }); return true; }
       const r = await createZip(snapshotDir, out);
       if (!r.ok) { reply(500, { error: `No se pudo crear el ZIP: ${r.error || "error desconocido"}` }); return true; }
       const stat = fs.statSync(out);
@@ -92,7 +93,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
       await new Promise<void>(resolve => stream.on("close", () => resolve()));
       return true;
     } finally {
-      fs.rmSync(snapshotDir, { recursive: true, force: true });
+      fs.rmSync(snapshotDir, { recursive: true, force: true }); fs.rmSync(snapshotParent, { recursive: true, force: true });
     }
   }
   return false;

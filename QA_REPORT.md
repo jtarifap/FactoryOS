@@ -63,4 +63,5 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - Se eliminó la línea descriptiva «Agentes OpenCode · Brain STATIC/SIMPLE/COMPLEJA · Preview local · ZIP · Modificación» del header del panel.
 - En modo «Independientes por agente» se oculta «Modelo común / fallback» y se muestran los agentes; en «Modelo común» ocurre lo contrario. Se añadió la regla CSS `#common-model-section[hidden]` y pruebas de ambos modos.
 - Se estabilizó la prueba de frescura de `DELIVERY_REPORT.md` (margen de 1 s) para evitar falsos rojos por resolución de mtime.
+- Se regeneró `public/images/captApp2.jpg` (1091×837) con el modo «Independientes por agente» ya corregido: sin «Modelo común / fallback» y con los selectores por agente visibles. Las tres capturas del README se muestran a 250 px de ancho.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).

@@ -1,6 +1,12 @@
 # FactoryOS
 Fábrica autónoma de software con multiagentes IA para planificar, desarrollar, probar, corregir y entregar aplicaciones automáticamente.
 
+<p align="center">
+  <a href="public/images/captLanding.jpg"><img src="public/images/captLanding.jpg" alt="Landing de FactoryOS" width="250"></a>
+  <a href="public/images/captApp1.jpg"><img src="public/images/captApp1.jpg" alt="Panel de FactoryOS en modo Modelo común" width="250"></a>
+  <a href="public/images/captApp2.jpg"><img src="public/images/captApp2.jpg" alt="Panel de FactoryOS con modelos por agente" width="250"></a>
+</p>
+
 Repositorio: <https://github.com/jtarifap/FactoryOS>
 
 ## Requisitos

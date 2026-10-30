@@ -131,7 +131,11 @@ function effectiveModel(agent: AgentId): string {
 function normalizeSettings(input: any): ModelSettings | null {
   if (!input || !["independent", "common"].includes(input.mode)) return null;
   const commonModel = String(input.commonModel ?? "").trim();
-  const agentModels = input.agentModels ?? {};
+  const rawAgents = input.agentModels ?? {};
+  // En modo común el modelo común es el único efectivo: se replica en todos los agentes.
+  const agentModels = input.mode === "common"
+    ? { "factory-manager": commonModel, developer: commonModel, "qa-reviewer": commonModel, "delivery-manager": commonModel }
+    : rawAgents;
   const values = [commonModel, agentModels["factory-manager"], agentModels.developer, agentModels["qa-reviewer"], agentModels["delivery-manager"]];
   // OpenCode model IDs are provider/model. Restrict input before using it in command arguments.
   if (values.some(v => typeof v !== "string" || !String(v).trim() || String(v).length > 160 || !/^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:-]+$/.test(String(v).trim()))) return null;

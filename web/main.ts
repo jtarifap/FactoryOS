@@ -95,6 +95,7 @@ function fillModelSelect(select: HTMLSelectElement, selected: string) {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(model);
   }
+  let found = false;
   for (const [provider, items] of grouped) {
     const group = document.createElement("optgroup");
     group.label = provider;
@@ -104,11 +105,12 @@ function fillModelSelect(select: HTMLSelectElement, selected: string) {
       const suffix = state.settings?.modelStatus?.[model.id] === "no-results" ? " ⚠" :
                     state.settings?.modelStatus?.[model.id] === "ok" ? " ✔" : "";
       opt.textContent = `${model.name || model.id}${suffix}`;
-      if (model.id === selected) opt.selected = true;
+      if (model.id === selected) { opt.selected = true; found = true; }
       group.appendChild(opt);
     }
     select.appendChild(group);
   }
+  if (found) select.value = selected;
 }
 
 function buildSettingsUI(): HTMLElement {
@@ -270,7 +272,7 @@ function buildSettingsUI(): HTMLElement {
     });
     const data = await r.json();
     els.settingsFeedback.textContent = r.ok ? "Configuración guardada." : data.error || "Error al guardar";
-    await loadSettings();
+    await loadSettings(false);
   };
   els.settingsBody.appendChild(save);
   els.settingsBody.appendChild(els.settingsFeedback);
@@ -465,11 +467,11 @@ function renderHeader(): HTMLElement {
   return header;
 }
 
-async function loadSettings() {
+async function loadSettings(preserveSelection = true) {
   const r = await fetch("/api/settings");
   const data = await r.json();
   state.settings = data as Settings;
-  const preservedSelections = [
+  const preservedSelections = preserveSelection ? [
     "common-model",
     "model-factory-manager",
     "model-developer",
@@ -478,7 +480,7 @@ async function loadSettings() {
   ].map(id => ({
     id,
     value: (document.getElementById(id) as HTMLSelectElement | null)?.value ?? "",
-  }));
+  })) : [];
   const mode = qs<HTMLSelectElement>("#mode");
   const common = qs<HTMLSelectElement>("#common-model");
   const auto = qs<HTMLInputElement>("#auto-approve");
@@ -499,11 +501,14 @@ async function loadSettings() {
 
 function populateAllModelSelects() {
   if (!state.settings) return;
-  fillModelSelect(qs<HTMLSelectElement>("#common-model"), state.settings.commonModel);
-  fillModelSelect(qs<HTMLSelectElement>("#model-factory-manager"), state.settings.agentModels["factory-manager"]);
-  fillModelSelect(qs<HTMLSelectElement>("#model-developer"), state.settings.agentModels.developer);
-  fillModelSelect(qs<HTMLSelectElement>("#model-qa-reviewer"), state.settings.agentModels["qa-reviewer"]);
-  fillModelSelect(qs<HTMLSelectElement>("#model-delivery-manager"), state.settings.agentModels["delivery-manager"]);
+  const { mode, commonModel, agentModels } = state.settings;
+  // En modo común el modelo común es el efectivo para todos los agentes.
+  const agentModel = (agent: AgentId) => mode === "common" ? commonModel : agentModels[agent];
+  fillModelSelect(qs<HTMLSelectElement>("#common-model"), commonModel);
+  fillModelSelect(qs<HTMLSelectElement>("#model-factory-manager"), agentModel("factory-manager"));
+  fillModelSelect(qs<HTMLSelectElement>("#model-developer"), agentModel("developer"));
+  fillModelSelect(qs<HTMLSelectElement>("#model-qa-reviewer"), agentModel("qa-reviewer"));
+  fillModelSelect(qs<HTMLSelectElement>("#model-delivery-manager"), agentModel("delivery-manager"));
 }
 
 async function loadModels() {

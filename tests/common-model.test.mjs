@@ -35,9 +35,18 @@ async function mount(testResponse = { ok: true }, mode = "common") {
   };
   const fetch = async (url, options) => {
     calls.push({ url, options });
+    if (url === "/api/settings" && options?.method === "PUT") {
+      const next = JSON.parse(options.body);
+      Object.assign(settings, next);
+      return { ok: true, json: async () => ({ ok: true, settings }) };
+    }
     if (url === "/api/models/test" && testResponse instanceof Error) throw testResponse;
     return { ok: true, json: async () => url === "/api/settings" ? settings
-      : url === "/api/models" ? { models: [{ id: "test/model", name: "Test Model", providerID: "test" }] }
+      : url === "/api/models" ? { models: [
+          { id: "test/model", name: "Test Model", providerID: "test" },
+          { id: "test/new", name: "New Model", providerID: "test" },
+          { id: "test/other", name: "Other Model", providerID: "test" },
+        ] }
         : url === "/api/models/test" ? testResponse : [] };
   };
   const safeDomSource = fs.readFileSync(new URL("../web/safe-dom.ts", import.meta.url), "utf8");
@@ -60,7 +69,7 @@ async function mount(testResponse = { ok: true }, mode = "common") {
   await new Promise(resolve => setImmediate(resolve));
   const select = document.getElementById("common-model");
   const button = select.parentElement.children.find(el => el.tagName === "button");
-  return { select, button, calls, tooltip: document.getElementById("model-tooltip"), elements };
+  return { select, button, calls, settings, tooltip: document.getElementById("model-tooltip"), elements };
 }
 
 test("common model has a working Probar button using the selected model", async () => {
@@ -139,4 +148,38 @@ test("cambiar el modo alterna la visibilidad de ambas secciones", async () => {
 test("el CSS respeta hidden en la sección de modelo común", async () => {
   const css = fs.readFileSync(new URL("../web/style.css", import.meta.url), "utf8");
   assert.match(css, /#common-model-section\[hidden\]\s*\{[^}]*display\s*:\s*none/);
+});
+
+const AGENT_IDS = ["model-factory-manager", "model-developer", "model-qa-reviewer", "model-delivery-manager"];
+const AGENT_KEYS = ["factory-manager", "developer", "qa-reviewer", "delivery-manager"];
+const saveButton = elements => elements.find(el => el.tagName === "button" && el.textContent === "Guardar configuración");
+
+test("guardar en modo común aplica el modelo común a todos los agentes", async () => {
+  const { elements, settings, calls } = await mount({ ok: true }, "common");
+  for (const id of AGENT_IDS) elements.find(el => el.id === id).value = "test/other";
+  elements.find(el => el.id === "common-model").value = "test/new";
+  const save = saveButton(elements);
+  assert.ok(save, "Missing save button");
+  await save.onclick({ preventDefault() {} });
+  const put = calls.find(call => call.url === "/api/settings" && call.options?.method === "PUT");
+  assert.ok(put, "Missing settings PUT");
+  const payload = JSON.parse(put.options.body);
+  for (const agent of AGENT_KEYS) {
+    assert.equal(payload.agentModels[agent], "test/new", `payload ${agent}`);
+    assert.equal(settings.agentModels[agent], "test/new", `saved ${agent}`);
+    assert.equal(elements.find(el => el.id === `model-${agent}`).value, "test/new", `select ${agent}`);
+  }
+});
+
+test("guardar en modo independiente conserva los modelos por agente", async () => {
+  const { elements, settings } = await mount({ ok: true }, "independent");
+  elements.find(el => el.id === "common-model").value = "test/new";
+  elements.find(el => el.id === "model-developer").value = "test/other";
+  const save = saveButton(elements);
+  assert.ok(save, "Missing save button");
+  await save.onclick({ preventDefault() {} });
+  assert.equal(settings.commonModel, "test/new");
+  assert.equal(settings.agentModels.developer, "test/other");
+  assert.equal(settings.agentModels["factory-manager"], "test/model");
+  assert.equal(elements.find(el => el.id === "model-developer").value, "test/other");
 });

@@ -60,4 +60,5 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - Revisión final: se corrigió el contraste de los CTA en hover (`.cta:hover`) y los enlaces muertos de Docs/GitHub, que ahora apuntan al repositorio real. Las pruebas cubren ambas regresiones y que `vite.config.ts` declare las dos entradas.
 - Se alineó verticalmente el logo con el nombre FactoryOS en la landing y el panel (mismo `viewBox`), con prueba de regresión.
 - Repositorio y enlaces actualizados a `github.com/jtarifap/FactoryOS`; el remoto `origin` apunta a la nueva URL y `git ls-remote` responde en `main`.
+- Se eliminó la línea descriptiva «Agentes OpenCode · Brain STATIC/SIMPLE/COMPLEJA · Preview local · ZIP · Modificación» del header del panel.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).

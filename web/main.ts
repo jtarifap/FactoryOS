@@ -454,8 +454,6 @@ function renderHeader(): HTMLElement {
   name.innerHTML = "Factory<span>OS</span>";
   brand.appendChild(name);
   left.appendChild(brand);
-  const lead = create("p", "Agentes OpenCode · Brain STATIC/SIMPLE/COMPLEJA · Preview local · ZIP · Modificación");
-  left.appendChild(lead);
   const badge = create("span", "Local / Windows");
   badge.className = "chip";
   header.appendChild(left);

@@ -412,10 +412,29 @@ function renderPreview(): HTMLElement {
     els.previewFrame.removeAttribute("src");
   };
 
-  zip.onclick = () => {
+  zip.onclick = async () => {
     const dir = els.projectSelect.value;
     if (!dir) return;
-    window.open(`/api/projects/zip?directory=${encodeURIComponent(dir)}`, "_blank", "noopener");
+    const r = await fetch(`/api/projects/zip?directory=${encodeURIComponent(dir)}`);
+    if (!r.ok) {
+      let message = "No se pudo generar el ZIP";
+      try {
+        const data = await r.json();
+        message = data.error || message;
+        if (Array.isArray(data.files) && data.files.length) message += `\n${data.files.join("\n")}`;
+      } catch {}
+      window.alert(message);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${dir}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   return section;
@@ -533,7 +552,28 @@ async function loadJobs() {
     if (["done", "validated", "needs_intervention"].includes(job.status)) {
       const zip = create("button", "ZIP");
       zip.className = "secondary";
-      zip.onclick = () => window.open(`/api/projects/zip?directory=${encodeURIComponent(job.directory)}`, "_blank", "noopener");
+      zip.onclick = async () => {
+        const r = await fetch(`/api/projects/zip?directory=${encodeURIComponent(job.directory)}`);
+        if (!r.ok) {
+          let message = "No se pudo generar el ZIP";
+          try {
+            const data = await r.json();
+            message = data.error || message;
+            if (Array.isArray(data.files) && data.files.length) message += `\n${data.files.join("\n")}`;
+          } catch {}
+          window.alert(message);
+          return;
+        }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${job.directory.split(/[\\/]/).pop() || "proyecto"}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
       actions.appendChild(zip);
     }
     const del = create("button", "Borrar");

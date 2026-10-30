@@ -32,6 +32,7 @@ test("job name and phase with HTML are rendered as literal text, never parsed as
   const summary = renderJobSummary(document, { name, phase, status: "failed" });
   assert.match(summary.textContent, /<img/);
   assert.match(summary.textContent, /<svg/);
+  assert.match(summary.textContent, / · failed/);
   assert.deepEqual(summary.children.map(child => child.tagName), ["strong", "span", "span"]);
 });
 

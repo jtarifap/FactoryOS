@@ -7,7 +7,7 @@ export function renderJobSummary(document: Document, job: SafeJobSummary): HTMLD
   name.textContent = job.name;
   const status = document.createElement("span");
   status.className = `status status-${job.status}`;
-  status.textContent = job.status;
+  status.textContent = ` · ${job.status}`;
   const phase = document.createElement("span");
   phase.textContent = ` · ${job.phase}`;
   summary.append(name, status, phase);

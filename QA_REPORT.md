@@ -1,4 +1,4 @@
-# QA Report — DevFactory 2.0
+# QA Report — FactoryOS 2.0
 
 Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en worktree aislado `high-priority-hardening`; el código rastreado de `main` sigue en `66bfce5`. Los documentos de diseño/plan están sin seguimiento en el checkout original.
 
@@ -59,4 +59,5 @@ Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en workt
 - Comprobación manual con Vite en `127.0.0.1:5173`: `/` responde 200 con `landing.css` y sin `/main.ts`; `/app.html` responde 200 con `/main.ts`.
 - Revisión final: se corrigió el contraste de los CTA en hover (`.cta:hover`) y los enlaces muertos de Docs/GitHub, que ahora apuntan al repositorio real. Las pruebas cubren ambas regresiones y que `vite.config.ts` declare las dos entradas.
 - Se alineó verticalmente el logo con el nombre FactoryOS en la landing y el panel (mismo `viewBox`), con prueba de regresión.
+- Repositorio y enlaces actualizados a `github.com/jtarifap/FactoryOS`; el remoto `origin` apunta a la nueva URL y `git ls-remote` responde en `main`.
 - No se han añadido dependencias ni se ha ejecutado ningún proveedor real. El proyecto original en `projects/` se mantiene intacto (no está versionado).

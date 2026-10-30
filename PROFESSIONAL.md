@@ -1,4 +1,4 @@
-# DevFactory 2.0 — estado profesional
+# FactoryOS 2.0 — estado profesional
 
 ## Objetivo
 

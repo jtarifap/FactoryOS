@@ -53,7 +53,7 @@ test("el logo y el nombre comparten la misma alineación", () => {
 test("los enlaces de la landing apuntan a destinos reales", () => {
   const html = read("../web/index.html");
   assert.ok(!html.includes('href="#"'), "quedan enlaces muertos en la portada");
-  assert.ok(html.includes("https://github.com/jtarifap/DevFactory"), "falta el repositorio real");
+  assert.ok(html.includes("https://github.com/jtarifap/FactoryOS"), "falta el repositorio real");
 });
 
 test("la página de la app sigue cargando el bundle de FactoryOS", () => {

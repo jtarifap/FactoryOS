@@ -1,6 +1,8 @@
 # FactoryOS
 Fábrica autónoma de software con multiagentes IA para planificar, desarrollar, probar, corregir y entregar aplicaciones automáticamente.
 
+Repositorio: <https://github.com/jtarifap/FactoryOS>
+
 ## Requisitos
 
 - Windows 10/11.
@@ -40,7 +42,7 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 - Los agentes se configuran por agente (factory-manager, developer, qa-reviewer, delivery-manager) con selector desplegable y prueba individual por modelo.
 - El selector **Modelo común / fallback** también incluye **Probar** y tooltip al pasar el cursor o recibir foco. Todas las pruebas usan el modelo seleccionado con el agente integrado `build` y una instrucción de responder solo OK, sin herramientas: no ejecutan los planes de los agentes de fábrica ni cambian los modelos seleccionados. El resultado sí se registra en el historial y estado del modelo.
 - `autoApprove` (casilla): si esta marcada, los agentes ejecutan herramientas sin pedir permiso; desmarcada, OpenCode las rechaza y se informa en el log.
-- Vista previa desde DevFactory: arranca apps Node (puerto web asignado) o sirve estaticos desde `projects/`.
+- Vista previa desde FactoryOS: arranca apps Node (puerto web asignado) o sirve estaticos desde `projects/`.
 - El refresco automático conserva el proyecto seleccionado en **Vista previa y ZIP** y en el selector de modificación, mientras el proyecto siga existiendo.
 - Los modelos se obtienen de `opencode models --verbose` y se prueban con `opencode run ... "Responde OK"` (timeout ~90s, con deteccion de cuota, credenciales, rate limit, timeout y retries abortadas cuando aparece un error real).
 - Logs limitados y cancelacion desde el panel. Cada fase tiene un timeout de 20 min.
@@ -98,4 +100,4 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 - `npm test` ejecuta pruebas unitarias/regresión y handlers ZIP/preview con fixtures sintéticos; no llama a proveedores reales. En Windows, los tests de ZIP usan `tar.exe`.
 - `tests/landing.test.mjs` valida la landing: secciones, estilos y botones que abren `/app.html`.
 - `curl http://127.0.0.1:4177/api/health` comprueba la API mientras esta en ejecucion.
-- Crea un proyecto "hola mundo" desde DevFactory y observa logs/QA report.
+- Crea un proyecto "hola mundo" desde FactoryOS y observa logs/QA report.

@@ -1,13 +1,17 @@
 # QA Report — FactoryOS 2.0
 
-Fecha de validación: 2026-10-28. Alcance: cambios de prioridades altas en worktree aislado `high-priority-hardening`; el código rastreado de `main` sigue en `66bfce5`. Los documentos de diseño/plan están sin seguimiento en el checkout original.
+Fecha de validación: 2026-10-31. Alcance: validación completa del proyecto principal (FactoryOS) y revisión del proyecto `responde-a-las-preguntas-a0c4a165`.
 
 ## Resultado
 
-- `npm test`: **62/62 PASS**.
+- `npm test`: **88/88 PASS**.
 - `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
-- `git diff --check`: sin errores; Git muestra únicamente avisos de conversión LF/CRLF de Windows.
+- `git diff --check`: sin errores; Git muestra únicamente avisos de conversión LF/CRLF de Windows en `web/main.ts`.
 - No se ejecutó generación con proveedor real ni se leyeron credenciales.
+
+## Proyecto `responde-a-las-preguntas-a0c4a165`
+
+Este proyecto contiene únicamente un archivo `respuestas.txt` con 8 líneas de respuestas clasificadas (constelación, sandalia, Segre, archipiélago, dulzura, trampolín, asco, Alcanar). No tiene `package.json`, scripts de build, tests ni dependencias. Es un archivo de datos estático sin proceso de compilación ni pruebas automatizadas.
 
 ## Prioridad 1 — worker y cancelación
 

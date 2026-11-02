@@ -334,6 +334,19 @@ function renderCreateJob(): HTMLElement {
   form.appendChild(submit);
   form.appendChild(feedback);
 
+  let isModifyMode = false;
+
+  // Actualiza el texto del botón según si hay un proyecto seleccionado
+  directory.onchange = () => {
+    if (directory.value) {
+      submit.textContent = "Modificar proyecto";
+      isModifyMode = true;
+    } else {
+      submit.textContent = "Crear y ejecutar";
+      isModifyMode = false;
+    }
+  };
+
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     feedback.textContent = "Enviando...";
@@ -352,9 +365,14 @@ function renderCreateJob(): HTMLElement {
       feedback.textContent = data.error || "No se pudo crear el trabajo";
       return;
     }
-    feedback.textContent = `Trabajo creado: ${data.id}`;
+    feedback.textContent = isModifyMode
+      ? `Proyecto modificado: ${name.value.trim()} (${directory.value})`
+      : `Trabajo creado: ${data.id}`;
     name.value = "";
     request.value = "";
+    directory.selectedIndex = 0;
+    submit.textContent = "Crear y ejecutar";
+    isModifyMode = false;
     await loadJobs();
     await loadProjects();
   };

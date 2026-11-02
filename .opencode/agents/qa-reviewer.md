@@ -1,5 +1,6 @@
 ---
 description: Revisa calidad y funcionamiento del código y el cumplimiento del diseño. Solo interviene en proyectos de complejidad estándar o compleja.
+model: ollama-cloud/beam
 mode: subagent
 temperature: 0.1
 tools:

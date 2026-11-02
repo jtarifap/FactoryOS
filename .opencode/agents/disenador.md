@@ -1,5 +1,6 @@
 ---
 description: Diseña la interfaz y la experiencia de usuario antes del desarrollo. Solo interviene si el proyecto tiene interfaz (ui = true).
+model: ollama-cloud/beam
 mode: subagent
 temperature: 0.7
 tools:

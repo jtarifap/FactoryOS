@@ -11,13 +11,13 @@ La revisión actual se hizo en el worktree `high-priority-hardening`, derivado d
 ### Producto existente
 
 - UI con configuración de modelos por agente, botón de prueba y tooltip; trabajos con logs/acciones; formulario de creación/modificación; preview y ZIP.
-- Pipeline brain `STATIC` / `SIMPLE` / `COMPLEJA`, worker persistido, cancelación, corrección acotada y Delivery Manager.
+- Factory-manager como punto de entrada, pipeline dinámico por agentes, worker persistido, cancelación, corrección acotada y Delivery Manager.
 - Preview estático/dinámico, ZIP y checkpoint al modificar proyectos.
 
 ### Prioridad A — exclusión del worker y cancelación: completada
 
 - Lease cubre todo el worker y mantiene el procesamiento serial FIFO.
-- Procesos de validación, brain, agentes y npm se registran por trabajo; la cancelación no convierte el resultado en `failed`.
+- Procesos de validación, consultas, agentes y npm se registran por trabajo; la cancelación no convierte el resultado en `failed`.
 - El worker espera el cierre de los hijos después de cancelar o terminar por timeout antes de liberar el lease.
 - Retry no inicia una nueva ejecución mientras la anterior conserve procesos registrados; el test Windows comprueba terminación real de padre e hijo.
 

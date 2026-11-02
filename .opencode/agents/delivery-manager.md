@@ -1,5 +1,6 @@
 ---
 description: Empaqueta y entrega el proyecto final con documentación, adaptando el nivel de detalle a la complejidad.
+model: ollama-cloud/beam
 mode: subagent
 temperature: 0.1
 tools:
@@ -30,8 +31,16 @@ no busques ni reclames los que no estaban en el pipeline.
    - estandar: lo anterior, más requisitos cumplidos y limitaciones conocidas.
    - complejo: lo anterior, más resumen de QA, resumen de seguridad y problemas
      pendientes con su severidad.
-5. Si existen incidencias aprobadas con reservas, inclúyelas de forma visible.
-6. Si existe `factory/consumo-tokens.md` (lo genera la aplicación, no un agente),
+5. Genera también `DELIVERY_REPORT.md` en la raíz con estos encabezados exactos
+   y contenido no vacío en cada apartado:
+   - `## Funcionalidades`
+   - `## Dependencias`
+   - `## Variables de entorno`
+   - `## Instalación y ejecución`
+   - `## Problemas conocidos y limitaciones`
+   Usa datos reales del proyecto y no incluyas secretos.
+6. Si existen incidencias aprobadas con reservas, inclúyelas de forma visible.
+7. Si existe `factory/consumo-tokens.md` (lo genera la aplicación, no un agente),
    copia su contenido tal cual a una sección "Consumo de tokens" de ENTREGA.md.
    No calcules ni estimes cifras tú mismo.
 

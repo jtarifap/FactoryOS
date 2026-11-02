@@ -1,6 +1,19 @@
 # QA Report — FactoryOS 2.0
 
-Fecha de validación: 2026-10-31. Alcance: validación completa del proyecto principal (FactoryOS) y revisión del proyecto `responde-a-las-preguntas-a0c4a165`.
+## Factory-manager, modelos y consultas (2026-11-02)
+
+- Factory-manager es agente `primary` y `default_agent`; los cinco especialistas son `subagent`.
+- FactoryOS enruta las consultas directamente a Factory-manager y dirige los proyectos nuevos/modificaciones al pipeline que él decida.
+- El panel tiene seis selectores de modelo y conserva los modos independiente/común; la selección se persiste en `data/settings.json` y en el frontmatter de cada agente.
+- La configuración activa se consultó por API: modo independiente, seis agentes y versión de migración 2.
+- `opencode agent list` confirma Factory-manager como `primary` y los cinco especialistas como `subagent`.
+- Prueba visual sin enviar consulta: Proyecto es el tipo inicial; en Consulta aparecen «Consultar», «Escribe aquí tu consulta», «Respuestas» y «Respuestas a tus consultas», y se oculta el selector de proyecto. Al volver a Proyecto se restauran los campos y el selector.
+- `npm test`: **119/119 PASS**.
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- `git diff --check`: sin errores; solo avisos de conversión LF/CRLF de Windows.
+- No se hizo una ejecución de proyecto/consulta con proveedor real durante esta revisión.
+
+Validación anterior: 2026-10-31. Alcance: validación completa del proyecto principal (FactoryOS) y revisión del proyecto `responde-a-las-preguntas-a0c4a165`.
 
 ## Resultado
 
@@ -16,7 +29,7 @@ Este proyecto contiene únicamente un archivo `respuestas.txt` con 8 líneas de 
 ## Prioridad 1 — worker y cancelación
 
 - Lease excluye workers solapados durante todo el ciclo; los nuevos trabajos continúan en cola FIFO.
-- Se registran procesos de validación de modelos, brain, agentes y npm por ID de trabajo. Cancelar termina el árbol de procesos y deja el estado `cancelled`.
+- Se registran procesos de validación de modelos, consultas, agentes y npm por ID de trabajo. Cancelar termina el árbol de procesos y deja el estado `cancelled`.
 - El lease no se libera hasta que los hijos registrados cierran, incluso después de timeout. Esto evita avanzar de fase o trabajo mientras siga vivo un hijo.
 - Endpoint de cancelación solo acepta trabajos `queued` o `running`.
 - Retry devuelve 409 mientras el worker anterior todavía mantiene el registro del job. En Windows, `taskkill /T /F` termina el árbol antes de señalizar el padre; un test crea y termina una pareja real de procesos.

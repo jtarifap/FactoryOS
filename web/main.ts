@@ -2,11 +2,13 @@
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
 
-type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager";
+type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager" | "disenador" | "auditoria-seguridad";
 type Job = {
   id: string;
   name: string;
   request: string;
+  requestKind?: "project" | "question";
+  answer?: string;
   status: string;
   phase: string;
   createdAt: string;
@@ -23,6 +25,7 @@ type Settings = {
   agentModels: Record<AgentId, string>;
   autoApprove: boolean;
   modelStatus?: Record<string, string>;
+  agentModelConfigVersion?: 2;
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -46,7 +49,19 @@ const state = {
   previewDirectory: "",
   openLogs: new Set<string>(),
   lastJobsSignature: "",
+  activeConsultationId: "",
+  consultationSelectionInitialized: false,
 };
+
+let consultationOutputField: HTMLTextAreaElement | null = null;
+const AGENTS: Array<{ id: AgentId; label: string }> = [
+  { id: "factory-manager", label: "factory-manager" },
+  { id: "developer", label: "developer" },
+  { id: "qa-reviewer", label: "qa-reviewer" },
+  { id: "delivery-manager", label: "delivery-manager" },
+  { id: "disenador", label: "disenador" },
+  { id: "auditoria-seguridad", label: "auditoria-seguridad" },
+];
 
 const els = {
   settingsBody: document.createElement("div"),
@@ -122,6 +137,30 @@ function fillModelSelect(select: HTMLSelectElement, selected: string) {
   if (found) select.value = selected;
 }
 
+async function testModel(select: HTMLSelectElement, agent: AgentId, button: HTMLButtonElement) {
+  button.disabled = true;
+  const previousText = button.textContent || "Probar";
+  button.textContent = "Probando...";
+  try {
+    const model = select.value;
+    const r = await fetch("/api/models/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, agent }),
+    });
+    const data = await r.json();
+    els.settingsFeedback.textContent = r.ok && data.ok
+      ? `OK: ${agent} -> ${model}`
+      : `Fallo: ${data.error || model}`;
+    await loadSettings();
+  } catch (error) {
+    els.settingsFeedback.textContent = `Error al probar ${agent}: ${String(error)}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText;
+  }
+}
+
 function buildSettingsUI(): HTMLElement {
   const section = panel("Modelos de IA y configuración");
 
@@ -157,7 +196,7 @@ function buildSettingsUI(): HTMLElement {
   modeLabel.appendChild(modeSelect);
   els.settingsBody.appendChild(modeLabel);
 
-  const commonLabel = create("label", "Modelo común / fallback");
+  const commonLabel = create("label", "Modelo común");
   const commonSelect = document.createElement("select");
   commonSelect.id = "common-model";
   setTooltipForModel(commonSelect);
@@ -166,44 +205,17 @@ function buildSettingsUI(): HTMLElement {
   const commonTest = create("button", "Probar");
   commonTest.type = "button";
   commonTest.className = "secondary test-model";
-  commonTest.onclick = async () => {
-    commonTest.disabled = true;
-    commonTest.textContent = "Probando...";
-    try {
-      const model = commonSelect.value;
-      const r = await fetch("/api/models/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, agent: "factory-manager" }),
-      });
-      const data = await r.json();
-      els.settingsFeedback.textContent = r.ok && data.ok
-        ? `OK: modelo común -> ${model}`
-        : `Fallo: ${data.error || model}`;
-      await loadSettings();
-    } catch (error) {
-      els.settingsFeedback.textContent = `Error al probar el modelo común: ${String(error)}`;
-    } finally {
-      commonTest.disabled = false;
-      commonTest.textContent = "Probar";
-    }
-  };
+  commonTest.onclick = () => testModel(commonSelect, "factory-manager", commonTest);
   commonRow.appendChild(commonSelect);
   commonRow.appendChild(commonTest);
   commonLabel.appendChild(commonRow);
   commonLabel.id = "common-model-section";
-  commonLabel.hidden = modeSelect.value === "independent";
+  commonLabel.hidden = true;
   els.settingsBody.appendChild(commonLabel);
 
   const grid = document.createElement("div");
   grid.className = "agent-grid";
-  const agents: Array<{ id: AgentId; label: string }> = [
-    { id: "factory-manager", label: "factory-manager" },
-    { id: "developer", label: "developer" },
-    { id: "qa-reviewer", label: "qa-reviewer" },
-    { id: "delivery-manager", label: "delivery-manager" },
-  ];
-  for (const agent of agents) {
+  for (const agent of AGENTS) {
     const wrap = create("label", agent.label);
     const row = create("div");
     row.className = "row";
@@ -211,26 +223,9 @@ function buildSettingsUI(): HTMLElement {
     select.id = `model-${agent.id}`;
     setTooltipForModel(select);
     const test = create("button", "Probar");
+    test.type = "button";
     test.className = "secondary test-model";
-    test.onclick = async () => {
-      test.disabled = true;
-      const prev = test.textContent || "Probar";
-      test.textContent = "Probando...";
-      try {
-        const model = select.value;
-        const r = await fetch("/api/models/test", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model, agent: agent.id }),
-        });
-        const data = await r.json();
-        els.settingsFeedback.textContent = data.ok ? `OK: ${agent.id} -> ${model}` : `Fallo: ${data.error || model}`;
-        await loadSettings();
-      } finally {
-        test.disabled = false;
-        test.textContent = prev;
-      }
-    };
+    test.onclick = () => testModel(select, agent.id, test);
     row.appendChild(select);
     row.appendChild(test);
     wrap.appendChild(row);
@@ -256,23 +251,17 @@ function buildSettingsUI(): HTMLElement {
     els.settingsFeedback.textContent = "Guardando...";
     const mode = modeSelect.value as Settings["mode"];
     const commonModel = commonSelect.value;
+    const agentModels = Object.fromEntries(AGENTS.map(agent => [
+      agent.id,
+      mode === "common"
+        ? commonModel
+        : (document.getElementById(`model-${agent.id}`) as HTMLSelectElement).value,
+    ])) as Record<AgentId, string>;
     const payload: Settings = {
       mode,
       commonModel,
       autoApprove: autoCheck.checked,
-      agentModels: mode === "common"
-        ? {
-            "factory-manager": commonModel,
-            developer: commonModel,
-            "qa-reviewer": commonModel,
-            "delivery-manager": commonModel,
-          }
-        : {
-            "factory-manager": (document.getElementById("model-factory-manager") as HTMLSelectElement).value,
-            developer: (document.getElementById("model-developer") as HTMLSelectElement).value,
-            "qa-reviewer": (document.getElementById("model-qa-reviewer") as HTMLSelectElement).value,
-            "delivery-manager": (document.getElementById("model-delivery-manager") as HTMLSelectElement).value,
-          },
+      agentModels,
     };
     const r = await fetch("/api/settings", {
       method: "PUT",
@@ -287,9 +276,9 @@ function buildSettingsUI(): HTMLElement {
   els.settingsBody.appendChild(els.settingsFeedback);
 
   modeSelect.onchange = () => {
-    const isCommon = modeSelect.value === "common";
-    commonLabel.hidden = !isCommon;
-    grid.hidden = isCommon;
+    const commonMode = modeSelect.value === "common";
+    commonLabel.hidden = !commonMode;
+    grid.hidden = commonMode;
   };
   autoCheck.onchange = () => {
     warning.hidden = autoCheck.checked;
@@ -313,11 +302,17 @@ function renderJobs(): HTMLElement {
 function renderCreateJob(): HTMLElement {
   const section = panel("Nuevo proyecto / modificar existente");
   const form = document.createElement("form");
+  const requestKind = document.createElement("select");
+  requestKind.id = "request-kind";
+  requestKind.appendChild(new Option("Proyecto", "project"));
+  requestKind.appendChild(new Option("Consulta", "question"));
+  requestKind.value = "project";
   const name = document.createElement("input");
   name.placeholder = "Nombre del proyecto";
   const request = document.createElement("textarea");
   request.rows = 5;
-  request.placeholder = "Describe lo que quieres construir o modificar";
+  request.placeholder = "Describe lo que quieres construir, modificar o consultar";
+  consultationOutputField = request;
   const directory = document.createElement("select");
   directory.dataset.role = "existing-directory";
   directory.innerHTML = `<option value="">Crear nuevo proyecto</option>`;
@@ -325,36 +320,57 @@ function renderCreateJob(): HTMLElement {
   const feedback = create("p");
   feedback.className = "hint";
 
-  form.appendChild(create("label", "Nombre"));
+  form.appendChild(create("label", "Tipo de solicitud"));
+  form.appendChild(requestKind);
+  const nameLabel = create("label", "Nombre");
+  const requestLabel = create("label", "Solicitud");
+  const directoryLabel = create("label", "Proyecto existente (opcional)");
+  form.appendChild(nameLabel);
   form.appendChild(name);
-  form.appendChild(create("label", "Solicitud"));
+  form.appendChild(requestLabel);
   form.appendChild(request);
-  form.appendChild(create("label", "Proyecto existente (opcional)"));
+  form.appendChild(directoryLabel);
   form.appendChild(directory);
   form.appendChild(submit);
   form.appendChild(feedback);
 
-  let isModifyMode = false;
-
-  // Actualiza el texto del botón según si hay un proyecto seleccionado
-  directory.onchange = () => {
-    if (directory.value) {
-      submit.textContent = "Modificar proyecto";
-      isModifyMode = true;
-    } else {
-      submit.textContent = "Crear y ejecutar";
-      isModifyMode = false;
+  let currentKind = requestKind.value;
+  const updateFormMode = (clearFields = false) => {
+    const isQuestion = requestKind.value === "question";
+    if (clearFields || requestKind.value !== currentKind) {
+      name.value = "";
+      request.value = "";
+      state.activeConsultationId = "";
+      state.consultationSelectionInitialized = true;
     }
+    currentKind = requestKind.value;
+    if (isQuestion) directory.value = "";
+    nameLabel.hidden = false;
+    nameLabel.textContent = isQuestion ? "Consultar" : "Nombre";
+    name.placeholder = isQuestion ? "Escribe aquí tu consulta" : "Nombre del proyecto";
+    name.hidden = false;
+    requestLabel.textContent = isQuestion ? "Respuestas" : "Solicitud";
+    request.placeholder = isQuestion ? "Respuestas a tus consultas" : "Describe lo que quieres construir o modificar";
+    request.readOnly = isQuestion;
+    directoryLabel.hidden = isQuestion;
+    directory.hidden = isQuestion;
+    submit.textContent = isQuestion
+      ? "Consultar"
+      : directory.value ? "Modificar proyecto" : "Crear y ejecutar";
   };
+  requestKind.onchange = () => updateFormMode(true);
+  directory.onchange = () => updateFormMode();
 
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     feedback.textContent = "Enviando...";
+    const kind = requestKind.value === "question" ? "question" : "project";
     const payload: Record<string, string> = {
-      name: name.value.trim(),
-      request: request.value.trim(),
+      name: kind === "question" ? "Consulta" : name.value.trim(),
+      request: kind === "question" ? name.value.trim() : request.value.trim(),
+      requestKind: kind,
     };
-    if (directory.value) payload.directory = directory.value;
+    if (kind === "project" && directory.value) payload.directory = directory.value;
     const r = await fetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -365,14 +381,21 @@ function renderCreateJob(): HTMLElement {
       feedback.textContent = data.error || "No se pudo crear el trabajo";
       return;
     }
-    feedback.textContent = isModifyMode
-      ? `Proyecto modificado: ${name.value.trim()} (${directory.value})`
-      : `Trabajo creado: ${data.id}`;
-    name.value = "";
-    request.value = "";
-    directory.selectedIndex = 0;
-    submit.textContent = "Crear y ejecutar";
-    isModifyMode = false;
+    feedback.textContent = kind === "question"
+      ? `Consulta enviada a Factory-manager: ${data.id}.`
+      : directory.value
+        ? `Proyecto modificado: ${name.value.trim()} (${directory.value})`
+        : `Trabajo creado: ${data.id}`;
+    if (kind === "question") {
+      state.activeConsultationId = data.id;
+      state.consultationSelectionInitialized = true;
+      request.value = "Consultando...";
+    } else {
+      name.value = "";
+      request.value = "";
+      directory.selectedIndex = 0;
+      updateFormMode();
+    }
     await loadJobs();
     await loadProjects();
   };
@@ -526,27 +549,23 @@ function renderHeader(): HTMLElement {
 async function loadSettings(preserveSelection = true) {
   const r = await fetch("/api/settings");
   const data = await r.json();
+  const preservedSelections = preserveSelection
+    ? ["common-model", ...AGENTS.map(agent => `model-${agent.id}`)].map(id => ({
+        id,
+        value: (document.getElementById(id) as HTMLSelectElement | null)?.value ?? "",
+      }))
+    : [];
   state.settings = data as Settings;
-  const preservedSelections = preserveSelection ? [
-    "common-model",
-    "model-factory-manager",
-    "model-developer",
-    "model-qa-reviewer",
-    "model-delivery-manager",
-  ].map(id => ({
-    id,
-    value: (document.getElementById(id) as HTMLSelectElement | null)?.value ?? "",
-  })) : [];
   const mode = qs<HTMLSelectElement>("#mode");
   const common = qs<HTMLSelectElement>("#common-model");
   const auto = qs<HTMLInputElement>("#auto-approve");
-  const grid = qs<HTMLDivElement>(".agent-grid");
   mode.value = state.settings.mode;
   common.value = state.settings.commonModel;
   auto.checked = !!state.settings.autoApprove;
+  const commonLabel = document.getElementById("common-model-section") as HTMLElement;
+  const grid = qs<HTMLDivElement>(".agent-grid");
+  commonLabel.hidden = state.settings.mode !== "common";
   grid.hidden = state.settings.mode === "common";
-  const commonSection = document.getElementById("common-model-section") as HTMLElement | null;
-  if (commonSection) commonSection.hidden = state.settings.mode === "independent";
   (document.getElementById("auto-approve-warning") as HTMLElement).hidden = auto.checked;
   if (state.models.length) populateAllModelSelects();
   for (const { id, value } of preservedSelections) {
@@ -557,14 +576,13 @@ async function loadSettings(preserveSelection = true) {
 
 function populateAllModelSelects() {
   if (!state.settings) return;
-  const { mode, commonModel, agentModels } = state.settings;
-  // En modo común el modelo común es el efectivo para todos los agentes.
-  const agentModel = (agent: AgentId) => mode === "common" ? commonModel : agentModels[agent];
-  fillModelSelect(qs<HTMLSelectElement>("#common-model"), commonModel);
-  fillModelSelect(qs<HTMLSelectElement>("#model-factory-manager"), agentModel("factory-manager"));
-  fillModelSelect(qs<HTMLSelectElement>("#model-developer"), agentModel("developer"));
-  fillModelSelect(qs<HTMLSelectElement>("#model-qa-reviewer"), agentModel("qa-reviewer"));
-  fillModelSelect(qs<HTMLSelectElement>("#model-delivery-manager"), agentModel("delivery-manager"));
+  fillModelSelect(qs<HTMLSelectElement>("#common-model"), state.settings.commonModel);
+  for (const agent of AGENTS) {
+    const selected = state.settings.mode === "common"
+      ? state.settings.commonModel
+      : state.settings.agentModels[agent.id] || state.settings.commonModel;
+    fillModelSelect(qs<HTMLSelectElement>(`#model-${agent.id}`), selected);
+  }
 }
 
 async function loadModels() {
@@ -577,10 +595,20 @@ async function loadModels() {
 async function loadJobs() {
   const r = await fetch("/api/jobs");
   const jobs = (await r.json()) as Job[];
-  const sig = JSON.stringify(jobs.map(j => [j.id, j.status, j.phase, j.updatedAt, j.lastError, (j.logs || []).length]));
+  const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, (j.logs || []).length]));
   if (sig === state.lastJobsSignature) return;
   state.lastJobsSignature = sig;
   state.jobs = jobs;
+  const requestKind = document.getElementById("request-kind") as HTMLSelectElement | null;
+  if (requestKind?.value === "question" && consultationOutputField) {
+    if (!state.consultationSelectionInitialized) {
+      state.activeConsultationId = jobs.find(job => job.requestKind === "question")?.id || "";
+      state.consultationSelectionInitialized = true;
+    }
+    const consultation = jobs.find(job => job.id === state.activeConsultationId && job.requestKind === "question");
+    consultationOutputField.value = consultation?.answer
+      || (consultation && ["queued", "running"].includes(consultation.status) ? "Consultando..." : "");
+  }
   els.jobList.innerHTML = "";
 
   for (const job of jobs) {
@@ -615,7 +643,7 @@ async function loadJobs() {
       retry.onclick = async () => { await fetch(`/api/jobs/${job.id}/retry`, { method: "POST" }); await loadJobs(); };
       actions.appendChild(retry);
     }
-    if (["done", "validated", "needs_intervention"].includes(job.status)) {
+    if (job.requestKind !== "question" && ["done", "validated", "needs_intervention"].includes(job.status)) {
       const zip = create("button", "ZIP");
       zip.className = "secondary";
       zip.onclick = async () => {

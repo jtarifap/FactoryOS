@@ -21,17 +21,17 @@ test("worker holds its lease until its child processes are closed", () => {
   assert.match(worker, /if \(\(j\.status as Status\) === "cancelled"\) return;/);
 });
 
-test("brain, agent and npm children are registered against their job", () => {
-  assert.match(between("function runAgent(", "function runLightAgent("), /jobProcesses\.add\(j\.id, child\)/);
-  assert.match(between("function runLightAgent(", "function execInProject("), /jobProcesses\.add\(j\.id, child\)/);
+test("consultation, project agent and npm children are registered against their job", () => {
+  assert.match(between("function runAgent(", "function runConsultation("), /jobProcesses\.add\(j\.id, child\)/);
+  assert.match(between("function runConsultation(", "function execInProject("), /jobProcesses\.add\(j\.id, child\)/);
   assert.match(between("function execInProject(", "async function verifyProject("), /jobProcesses\.add\(j\.id, proc\)/);
   assert.match(between("function listOpenCodeModels(", "async function validateConfiguredModels("), /jobId\?: string[\s\S]*jobProcesses\.add\(jobId, child\)/);
 });
 
-test("model listing, brain and npm timeouts kill but await process close", () => {
+test("model listing, consultation and npm timeouts kill but await process close", () => {
   for (const [start, end] of [
     ["function listOpenCodeModels(", "async function validateConfiguredModels("],
-    ["function runLightAgent(", "function execInProject("],
+    ["function runConsultation(", "function execInProject("],
     ["function execInProject(", "async function verifyProject("],
   ]) {
     const section = between(start, end);

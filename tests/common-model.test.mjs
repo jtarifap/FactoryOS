@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 
 // Minimal DOM and HTTP boundary: execute the actual UI without calling paid models.
-async function mount(testResponse = { ok: true }, mode = "common") {
+async function mount(testResponse = { ok: true }, mode = "independent") {
   const elements = [];
   class Element {
     children = []; style = {}; dataset = {}; listeners = {}; attributes = {}; ownText = "";
@@ -17,6 +17,7 @@ async function mount(testResponse = { ok: true }, mode = "common") {
     setAttribute(name, value) { this.attributes[name] = String(value); }
     set textContent(value) { this.ownText = String(value); this.children = []; }
     get textContent() { return this.ownText + this.children.map(child => child.textContent).join(""); }
+    get options() { return this.children.flatMap(child => child.tagName === "optgroup" ? child.children : [child]); }
     addEventListener(event, fn) { this.listeners[event] = fn; }
     getBoundingClientRect() { return { left: 20, bottom: 80 }; }
   }
@@ -37,10 +38,12 @@ async function mount(testResponse = { ok: true }, mode = "common") {
     setItem: (_key, value) => { savedTheme = value; },
   };
   const calls = [];
+  const agentIds = ["factory-manager", "developer", "qa-reviewer", "delivery-manager", "disenador", "auditoria-seguridad"];
   const settings = {
     mode, commonModel: "test/model", autoApprove: false,
-    agentModels: Object.fromEntries(["factory-manager", "developer", "qa-reviewer", "delivery-manager"].map(id => [id, "test/model"])),
+    agentModels: Object.fromEntries(agentIds.map(id => [id, "test/model"])),
   };
+  let latestJobs = [];
   const fetch = async (url, options) => {
     calls.push({ url, options });
     if (url === "/api/settings" && options?.method === "PUT") {
@@ -48,6 +51,13 @@ async function mount(testResponse = { ok: true }, mode = "common") {
       Object.assign(settings, next);
       return { ok: true, json: async () => ({ ok: true, settings }) };
     }
+    if (url === "/api/jobs" && options?.method === "POST") {
+      const payload = JSON.parse(options.body);
+      const id = "job-query1";
+      latestJobs = [{ id, name: payload.name, request: payload.request, requestKind: payload.requestKind, answer: payload.requestKind === "question" ? "Respuesta desde Factory-manager" : undefined, status: "done", phase: "Consulta respondida", createdAt: "now", updatedAt: "now", directory: "", logs: [] }];
+      return { ok: true, json: async () => ({ id }) };
+    }
+    if (url === "/api/jobs") return { ok: true, json: async () => latestJobs };
     if (url === "/api/models/test" && testResponse instanceof Error) throw testResponse;
     return { ok: true, json: async () => url === "/api/settings" ? settings
       : url === "/api/models" ? { models: [
@@ -122,39 +132,21 @@ test("common model test reports connection errors and restores button", async ()
   assert.ok(elements.some(el => el.textContent.includes("Sin conexión")));
 });
 
-test("modo común muestra el modelo común y oculta los agentes", async () => {
+test("independent mode exposes a separate model selector for all six agents", async () => {
   const { elements } = await mount();
-  const commonSection = elements.find(el => el.id === "common-model-section");
-  const grid = elements.find(el => el.className === "agent-grid");
-  assert.ok(commonSection, "Missing common model section");
-  assert.ok(grid, "Missing agent grid");
-  assert.equal(commonSection.hidden, false);
-  assert.equal(grid.hidden, true);
+  const ids = ["factory-manager", "developer", "qa-reviewer", "delivery-manager", "disenador", "auditoria-seguridad"];
+  assert.ok(elements.find(el => el.id === "mode"), "Missing model mode selector");
+  assert.ok(elements.find(el => el.className === "agent-grid"), "Missing agent selectors");
+  for (const id of ids) assert.ok(elements.find(el => el.id === `model-${id}`), `Missing model selector for ${id}`);
+  assert.equal(elements.find(el => el.className === "agent-grid").hidden, false);
 });
 
-test("modo independiente oculta el modelo común y muestra los agentes", async () => {
-  const { elements } = await mount({ ok: true }, "independent");
-  const commonSection = elements.find(el => el.id === "common-model-section");
+test("common mode fans out one model and hides the per-agent selectors", async () => {
+  const { elements } = await mount({ ok: true }, "common");
+  const common = elements.find(el => el.id === "common-model-section");
   const grid = elements.find(el => el.className === "agent-grid");
-  assert.ok(commonSection, "Missing common model section");
-  assert.ok(grid, "Missing agent grid");
-  assert.equal(commonSection.hidden, true);
-  assert.equal(grid.hidden, false);
-});
-
-test("cambiar el modo alterna la visibilidad de ambas secciones", async () => {
-  const { elements } = await mount();
-  const mode = elements.find(el => el.id === "mode");
-  const commonSection = elements.find(el => el.id === "common-model-section");
-  const grid = elements.find(el => el.className === "agent-grid");
-  assert.ok(mode && commonSection && grid, "Missing settings controls");
-  mode.value = "independent";
-  mode.onchange();
-  assert.equal(commonSection.hidden, true);
-  assert.equal(grid.hidden, false);
-  mode.value = "common";
-  mode.onchange();
-  assert.equal(commonSection.hidden, false);
+  assert.ok(common && grid, "Missing common or independent settings section");
+  assert.equal(common.hidden, false);
   assert.equal(grid.hidden, true);
 });
 
@@ -163,13 +155,11 @@ test("el CSS respeta hidden en la sección de modelo común", async () => {
   assert.match(css, /#common-model-section\[hidden\]\s*\{[^}]*display\s*:\s*none/);
 });
 
-const AGENT_IDS = ["model-factory-manager", "model-developer", "model-qa-reviewer", "model-delivery-manager"];
-const AGENT_KEYS = ["factory-manager", "developer", "qa-reviewer", "delivery-manager"];
+const AGENT_KEYS = ["factory-manager", "developer", "qa-reviewer", "delivery-manager", "disenador", "auditoria-seguridad"];
 const saveButton = elements => elements.find(el => el.tagName === "button" && el.textContent === "Guardar configuración");
 
-test("guardar en modo común aplica el modelo común a todos los agentes", async () => {
+test("saving in common mode applies one model to all six agents", async () => {
   const { elements, settings, calls } = await mount({ ok: true }, "common");
-  for (const id of AGENT_IDS) elements.find(el => el.id === id).value = "test/other";
   elements.find(el => el.id === "common-model").value = "test/new";
   const save = saveButton(elements);
   assert.ok(save, "Missing save button");
@@ -177,24 +167,96 @@ test("guardar en modo común aplica el modelo común a todos los agentes", async
   const put = calls.find(call => call.url === "/api/settings" && call.options?.method === "PUT");
   assert.ok(put, "Missing settings PUT");
   const payload = JSON.parse(put.options.body);
+  assert.equal(payload.mode, "common");
   for (const agent of AGENT_KEYS) {
     assert.equal(payload.agentModels[agent], "test/new", `payload ${agent}`);
     assert.equal(settings.agentModels[agent], "test/new", `saved ${agent}`);
-    assert.equal(elements.find(el => el.id === `model-${agent}`).value, "test/new", `select ${agent}`);
   }
 });
 
-test("guardar en modo independiente conserva los modelos por agente", async () => {
-  const { elements, settings } = await mount({ ok: true }, "independent");
-  elements.find(el => el.id === "common-model").value = "test/new";
-  elements.find(el => el.id === "model-developer").value = "test/other";
+test("saving in independent mode preserves each selected agent model", async () => {
+  const { elements, settings, calls } = await mount();
+  for (const [index, agent] of AGENT_KEYS.entries()) elements.find(el => el.id === `model-${agent}`).value = `test/model-${index}`;
   const save = saveButton(elements);
-  assert.ok(save, "Missing save button");
   await save.onclick({ preventDefault() {} });
-  assert.equal(settings.commonModel, "test/new");
-  assert.equal(settings.agentModels.developer, "test/other");
-  assert.equal(settings.agentModels["factory-manager"], "test/model");
-  assert.equal(elements.find(el => el.id === "model-developer").value, "test/other");
+  const put = calls.find(call => call.url === "/api/settings" && call.options?.method === "PUT");
+  const payload = JSON.parse(put.options.body);
+  assert.equal(payload.mode, "independent");
+  AGENT_KEYS.forEach((agent, index) => {
+    assert.equal(payload.agentModels[agent], `test/model-${index}`);
+    assert.equal(settings.agentModels[agent], `test/model-${index}`);
+  });
+});
+
+test("new security agent selector tests its own selected model", async () => {
+  const { elements, calls } = await mount();
+  const select = elements.find(el => el.id === "model-auditoria-seguridad");
+  assert.ok(select, "Missing Auditoría model selector");
+  select.value = "test/other";
+  const testButton = select.parentElement.children.find(el => el.tagName === "button");
+  await testButton.onclick();
+  const call = calls.find(entry => entry.url === "/api/models/test");
+  assert.deepEqual(JSON.parse(call.options.body), { model: "test/other", agent: "auditoria-seguridad" });
+});
+
+test("consultation uses its own input and displays Factory-manager's answer in the response field", async () => {
+  const { elements, calls } = await mount();
+  const kind = elements.find(el => el.id === "request-kind");
+  assert.ok(kind, "Missing request type selector");
+  kind.value = "question";
+  kind.onchange();
+  const submit = elements.find(el => el.tagName === "button" && el.textContent === "Consultar");
+  const form = elements.find(el => typeof el.onsubmit === "function");
+  assert.ok(submit && form, "Consultation form is not ready");
+  const query = elements.find(el => el.tagName === "input" && el.placeholder === "Escribe aquí tu consulta");
+  const response = elements.find(el => el.tagName === "textarea");
+  query.value = "¿Cómo organizo este proyecto?";
+  await form.onsubmit({ preventDefault() {} });
+  const job = calls.find(call => call.url === "/api/jobs" && call.options?.method === "POST");
+  assert.ok(job, "Missing job submission");
+  const payload = JSON.parse(job.options.body);
+  assert.equal(payload.requestKind, "question");
+  assert.equal(payload.request, "¿Cómo organizo este proyecto?");
+  assert.equal(payload.directory, undefined);
+  assert.equal(response.value, "Respuesta desde Factory-manager");
+});
+
+test("Project is the default request type", async () => {
+  const { elements } = await mount();
+  assert.equal(elements.find(el => el.id === "request-kind")?.value, "project");
+});
+
+test("switching modes restores project fields and reveals the existing-project selector", async () => {
+  const { elements } = await mount();
+  const directory = elements.find(el => el.dataset.role === "existing-directory");
+  const kind = elements.find(el => el.id === "request-kind");
+  assert.ok(directory && kind, "Missing project routing controls");
+  const nameLabel = elements.find(el => el.tagName === "label" && el.textContent === "Nombre");
+  const requestLabel = elements.find(el => el.tagName === "label" && el.textContent === "Solicitud");
+  const name = elements.find(el => el.placeholder === "Nombre del proyecto");
+  const request = elements.find(el => el.tagName === "textarea");
+  directory.value = "projects/sample";
+  directory.onchange();
+  assert.equal(elements.find(el => el.tagName === "button" && el.textContent === "Modificar proyecto")?.textContent, "Modificar proyecto");
+  kind.value = "question";
+  kind.onchange();
+  assert.equal(directory.value, "", "Consultations must not retain a project directory");
+  assert.equal(nameLabel.textContent, "Consultar");
+  assert.equal(name.placeholder, "Escribe aquí tu consulta");
+  assert.equal(nameLabel.hidden, false);
+  assert.equal(name.hidden, false);
+  assert.equal(requestLabel.textContent, "Respuestas");
+  assert.equal(request.placeholder, "Respuestas a tus consultas");
+  assert.equal(request.readOnly, true);
+  assert.equal(directory.hidden, true);
+  kind.value = "project";
+  kind.onchange();
+  assert.equal(nameLabel.textContent, "Nombre");
+  assert.equal(name.placeholder, "Nombre del proyecto");
+  assert.equal(requestLabel.textContent, "Solicitud");
+  assert.equal(request.readOnly, false);
+  assert.equal(directory.hidden, false);
+  assert.equal(elements.find(el => el.tagName === "button" && el.textContent === "Crear y ejecutar")?.textContent, "Crear y ejecutar");
 });
 
 test("theme toggle updates the root theme, saved preference and accessible icon", async () => {
@@ -224,3 +286,24 @@ test("theme toggle sits immediately before the Local / Windows badge", async () 
   assert.equal(header.children[1], statusGroup);
   assert.deepEqual(statusGroup.children, [toggle, badge]);
 });
+
+test("saving uses refreshed common model instead of stale independent selections", async () => {
+  const { elements, settings, calls } = await mount({ ok: true }, "independent");
+  for (const agent of AGENT_KEYS) elements.find(el => el.id === `model-${agent}`).value = "test/other";
+  elements.find(el => el.id === "common-model").value = "test/new";
+  const mode = elements.find(el => el.id === "mode");
+  mode.value = "common";
+  if (typeof mode.onchange === "function") mode.onchange();
+  const save = saveButton(elements);
+  assert.ok(save, "Missing save button");
+  await save.onclick({ preventDefault() {} });
+  for (const agent of AGENT_KEYS) {
+    assert.equal(
+      elements.find(el => el.id === `model-${agent}`).value,
+      "test/new",
+      `${agent} did not reflect the refreshed common model`
+    );
+  }
+});
+
+

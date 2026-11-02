@@ -11,6 +11,8 @@ import { handleZip } from "./zip.js";
 import { JobProcessRegistry, terminateChildTree, WorkerLease } from "./job-coordinator.js";
 import { appendVerificationEvidence, getProjectVerification, runProjectChecks, type VerificationCheck } from "./project-verification.js";
 import { captureDeliveryReportState, validateDeliveryCompletion, wasDeliveryReportUpdatedSince } from "./delivery-report.js";
+import { extractOpenCodeText, routeRequest, type RequestKind } from "./request-routing.js";
+import { AGENT_IDS, normalizeAgentModels, syncAgentModelFiles, type AgentId, type AgentModelMap, type ModelMode } from "./agent-model-config.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.OPENCODE_DB = ":memory:";
@@ -31,15 +33,15 @@ type ModelMeta = {
   limit?: { context: number; output: number };
   cost?: { input: number; output: number };
 };
-type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager";
 type ModelSettings = {
-  mode: "independent" | "common";
+  mode: ModelMode;
   commonModel: string;
-  agentModels: Record<AgentId, string>;
+  agentModels: AgentModelMap;
   modelStatus: Record<string, "ok" | "no-results">;
   autoApprove: boolean;
+  agentModelConfigVersion: 2;
 };
-type Job = { id: string; name: string; request: string; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
+type Job = { id: string; name: string; request: string; requestKind?: RequestKind; answer?: string; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
 
 const DEFAULT_SETTINGS: ModelSettings = {
   mode: "independent",
@@ -48,28 +50,29 @@ const DEFAULT_SETTINGS: ModelSettings = {
     "factory-manager": "opencode/big-pickle",
     developer: "opencode-go/kimi-k2.7-code",
     "qa-reviewer": "opencode/big-pickle",
-    "delivery-manager": "opencode/big-pickle"
+    "delivery-manager": "opencode/big-pickle",
+    disenador: "opencode/big-pickle",
+    "auditoria-seguridad": "opencode/big-pickle"
   },
   modelStatus: {},
-  autoApprove: false
+  autoApprove: false,
+  agentModelConfigVersion: 2
 };
 let settings: ModelSettings = structuredClone(DEFAULT_SETTINGS);
 try {
   const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
-  settings = {
-    mode: saved.mode === "common" ? "common" : "independent",
-    commonModel: typeof saved.commonModel === "string" ? saved.commonModel : DEFAULT_SETTINGS.commonModel,
-    agentModels: {
-      "factory-manager": typeof saved.agentModels?.["factory-manager"] === "string" ? saved.agentModels["factory-manager"] : DEFAULT_SETTINGS.agentModels["factory-manager"],
-      developer: typeof saved.agentModels?.developer === "string" ? saved.agentModels.developer : DEFAULT_SETTINGS.agentModels.developer,
-      "qa-reviewer": typeof saved.agentModels?.["qa-reviewer"] === "string" ? saved.agentModels["qa-reviewer"] : DEFAULT_SETTINGS.agentModels["qa-reviewer"],
-      "delivery-manager": typeof saved.agentModels?.["delivery-manager"] === "string" ? saved.agentModels["delivery-manager"] : DEFAULT_SETTINGS.agentModels["delivery-manager"]
-    },
+  const commonModel = typeof saved.commonModel === "string" ? saved.commonModel : DEFAULT_SETTINGS.commonModel;
+  const migratedMode: ModelMode = saved.agentModelConfigVersion === 2 && saved.mode === "common" ? "common" : "independent";
+  const normalized = normalizeAgentModels(migratedMode, commonModel, saved.agentModels);
+  if (normalized) settings = {
+    ...normalized,
     modelStatus: typeof saved.modelStatus === "object" && saved.modelStatus ? saved.modelStatus : {},
-    autoApprove: saved.autoApprove === true
+    autoApprove: saved.autoApprove === true,
+    agentModelConfigVersion: 2
   };
 } catch {}
 const saveSettings = () => fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf8");
+syncAgentModelFiles(path.join(ROOT, ".opencode", "agents"), settings.agentModels);
 saveSettings();
 
 let jobs: Job[] = [];
@@ -129,27 +132,13 @@ function effectiveModel(agent: AgentId): string {
   return settings.agentModels[agent].trim() || settings.commonModel;
 }
 function normalizeSettings(input: any): ModelSettings | null {
-  if (!input || !["independent", "common"].includes(input.mode)) return null;
-  const commonModel = String(input.commonModel ?? "").trim();
-  const rawAgents = input.agentModels ?? {};
-  // En modo común el modelo común es el único efectivo: se replica en todos los agentes.
-  const agentModels = input.mode === "common"
-    ? { "factory-manager": commonModel, developer: commonModel, "qa-reviewer": commonModel, "delivery-manager": commonModel }
-    : rawAgents;
-  const values = [commonModel, agentModels["factory-manager"], agentModels.developer, agentModels["qa-reviewer"], agentModels["delivery-manager"]];
-  // OpenCode model IDs are provider/model. Restrict input before using it in command arguments.
-  if (values.some(v => typeof v !== "string" || !String(v).trim() || String(v).length > 160 || !/^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:-]+$/.test(String(v).trim()))) return null;
+  const normalized = normalizeAgentModels(input?.mode, input?.commonModel, input?.agentModels);
+  if (!normalized) return null;
   return {
-    mode: input.mode,
-    commonModel,
-    agentModels: {
-      "factory-manager": String(agentModels["factory-manager"]).trim(),
-      developer: String(agentModels.developer).trim(),
-      "qa-reviewer": String(agentModels["qa-reviewer"]).trim(),
-      "delivery-manager": String(agentModels["delivery-manager"]).trim()
-    },
+    ...normalized,
     modelStatus: typeof settings?.modelStatus === "object" && settings.modelStatus ? settings.modelStatus : {},
-    autoApprove: input.autoApprove === true
+    autoApprove: input.autoApprove === true,
+    agentModelConfigVersion: 2
   };
 }
 
@@ -173,7 +162,7 @@ function listOpenCodeModels(jobId?: string): Promise<{ ok: boolean; output: stri
   });
 }
 async function validateConfiguredModels(jobId?: string): Promise<{ ok: boolean; models: string[]; message: string; output?: string }> {
-  const required = [...new Set([effectiveModel("factory-manager"), effectiveModel("developer"), effectiveModel("qa-reviewer")])];
+  const required = [...new Set(AGENT_IDS.map(effectiveModel))];
   const result = await listOpenCodeModels(jobId);
   if (!result.ok) return { ok: false, models: required, message: result.error || "No se pudo consultar OpenCode.", output: result.output.slice(-5000) };
   const clean = result.output.replace(/\u001b\[[0-9;]*m/g, "");
@@ -427,25 +416,26 @@ function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
   });
 }
 
-/** Lightweight agent run used by the "brain" phase to classify job complexity. */
-function runLightAgent(j: Job, prompt: string): Promise<{ ok: boolean; output: string }> {
+/** Single Factory-manager turn used to answer a consultation without starting the project pipeline. */
+function runConsultation(j: Job, prompt: string): Promise<{ ok: boolean; output: string }> {
   return new Promise(resolve => {
     if (j.status === "cancelled") return resolve({ ok: false, output: "" });
-    const model = effectiveModel("developer");
-    j.phase = `brain · ${model}`; save();
-    const child = spawn(OPENCODE_BIN, ["run", "--model", model, "--agent", "build", prompt], { cwd: j.directory, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const model = effectiveModel("factory-manager");
+    j.phase = `factory-manager · ${model}`; save();
+    const child = spawn(OPENCODE_BIN, ["run", "--model", model, "--agent", "factory-manager", "--format", "json", prompt], { cwd: j.directory || ROOT, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     jobProcesses.add(j.id, child);
     let output = "";
     let done = false;
     let timedOut = false;
-    const timer = setTimeout(() => { if (done) return; timedOut = true; killTree(child); }, 20 * 60 * 1000);
-    const onData = (d: Buffer) => { output += d.toString("utf8"); log(j, d.toString("utf8")); };
+    const timer = setTimeout(() => { if (done) return; timedOut = true; killTree(child); }, 120_000);
+    const onData = (d: Buffer) => { output += d.toString("utf8"); };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
     child.on("error", e => { if (done) return; done = true; clearTimeout(timer); log(j, "Error al iniciar OpenCode: " + e.message); resolve({ ok: false, output }); });
     child.on("close", code => {
       if (done) return; done = true; clearTimeout(timer);
       if (code === 0 && !timedOut && j.status !== "cancelled") return resolve({ ok: true, output });
+      log(j, timedOut ? "Factory-manager superó el límite de 120 segundos." : output.slice(-5000) || `Factory-manager terminó con código ${code}.`);
       resolve({ ok: false, output });
     });
   });
@@ -512,115 +502,77 @@ async function worker() {
   if (!j) { releaseWorker(); return; }
   j.status = "running"; j.updatedAt = stamp(); save();
   try {
-    log(j, "Validando los modelos configurados con `opencode models` antes de ejecutar...");
-    const validation = await validateConfiguredModels(j.id);
-    if ((j.status as Status) === "cancelled") return;
-    if (!validation.ok) {
-      log(j, "Validación de modelos fallida: " + validation.message);
-      if (validation.output) log(j, validation.output);
-      j.status = "failed"; j.phase = "Modelos no válidos o no disponibles";
-      j.lastError = validation.message;
-    } else {
-      log(j, validation.message);
-      // Brain phase: decide whether the job needs the full pipeline (plan → code → QA) or just a focused implementation.
-      log(j, "Fase brain: evaluando la complejidad de la solicitud antes de delegar el trabajo.");
-      const brain = await runLightAgent(j, `Evalúa la naturaleza de esta solicitud y responde SOLO con una palabra en mayúsculas: STATIC si basta HTML/CSS estático sin lógica/backend/build, SIMPLE si es un ejemplo mínimo con poco código, COMPLEJA si requiere arquitectura, backend, frontend o varias funcionalidades. Solicitud: ${j.request}`);
-      if ((j.status as Status) === "cancelled") { j.phase = "Cancelado"; return; }
-      const brainText = brain.ok ? brain.output.toUpperCase() : "";
-      const isStatic = brain.ok && /\bSTATIC\b/.test(brainText) && !/\bSIMPLE\b/.test(brainText) && !/\bCOMPLEJA\b/.test(brainText);
-      const isSimple = brain.ok && /\bSIMPLE\b/.test(brainText) && !/\bCOMPLEJA\b/.test(brainText) && !/\bSTATIC\b/.test(brainText);
-      let tasks: [AgentId, string][];
-      if (isStatic) {
-        log(j, "Solicitud estática detectada por el brain: se omite planificación y QA.");
-        tasks = [
-          ["developer", `Implementa la aplicación solicitada como una página HTML/CSS estática mínima, sin lógica, backend ni build. Genera obligatoriamente un archivo index.html (landing page) y los estilos necesarios, además de README.md. Solicitud: ${j.request}. No despliegues, no hagas push ni uses secretos.`]
-        ];
-      } else if (isSimple) {
-        log(j, "Solicitud simple detectada por el brain: se omite la fase de planificación.");
-        tasks = [
-          ["developer", `Implementa la aplicación solicitada de forma mínima y funcional. Genera README.md, scripts build/test y pruebas. Solicitud: ${j.request}. No uses arquitectura compleja si la solicitud no la exige. No despliegues, no hagas push ni uses secretos.`],
-          ["qa-reviewer", `Revisa el proyecto, ejecuta build y pruebas disponibles. Documenta resultados reales y problemas en QA_REPORT.md. Si hay errores de compilación, corrige los problemas sencillos. No declares éxito sin ejecutar pruebas.`]
-        ];
+    const route = routeRequest(j.requestKind ?? "project", j.directory);
+    if (!route) {
+      j.status = "failed"; j.phase = "Tipo de solicitud no válido";
+      j.lastError = "El trabajo no contiene un tipo de solicitud compatible.";
+    } else if (route.kind === "question") {
+      log(j, "Factory-manager responde directamente; no se crea proyecto ni se inicia pipeline.");
+      const response = await runConsultation(j, `Responde directamente a esta consulta en español. No delegues en agentes, no uses herramientas, no crees ni modifiques archivos. Consulta: ${j.request}`);
+      if ((j.status as Status) === "cancelled") return;
+      const answer = extractOpenCodeText(response.output);
+      if (!response.ok || !answer) {
+        j.status = "failed"; j.phase = "Factory-manager no pudo responder";
+        j.lastError = "OpenCode no devolvió una respuesta de texto para la consulta.";
       } else {
-        log(j, "Solicitud compleja (o indeterminada por defecto): se ejecuta el pipeline completo.");
-        tasks = [
-          ["factory-manager", `Analiza esta solicitud y crea PLAN.md con requisitos, arquitectura, hitos y criterios verificables. No modifiques archivos fuera de este proyecto. Solicitud: ${j.request}`],
-          ["developer", `Implementa la aplicación solicitada siguiendo PLAN.md. Genera README.md, scripts build/test y pruebas. Solicitud: ${j.request}. No despliegues, no hagas push ni uses secretos.`],
-          ["qa-reviewer", `Revisa el proyecto, ejecuta build y pruebas disponibles. Documenta resultados reales y problemas en QA_REPORT.md. Si hay errores de compilación, corrige los problemas sencillos. No declares éxito sin ejecutar pruebas.`]
-        ];
+        j.answer = answer;
+        log(j, "Consulta respondida por Factory-manager.");
+        j.status = "done"; j.phase = "Consulta respondida";
       }
-      for (const [agent, prompt] of tasks) {
-        if ((j.status as Status) === "cancelled") break;
-        log(j, `Comienza fase: ${agent} · modelo ${effectiveModel(agent)}`);
-        const ok = await runAgent(j, agent, prompt);
-        if (!ok) {
-          if ((j.status as Status) !== "cancelled") { j.status = "failed"; j.phase = `Falló ${agent}`; }
-          break;
-        }
-      }
-      const needsCorrection = (tasks.some(t => t[0] === "qa-reviewer") || tasks.some(t => t[0] === "delivery-manager" ? false : false)) && j.status === "running";
-      let attempts = 0;
-      // Technical verification loop with auto-correction (max 3 attempts)
-      if (j.status === "running" && tasks.some(t => t[0] === "developer")) {
-        let verify = await verifyProject(j);
-        if (!verify.ok) {
-          while (attempts < 3 && !verify.ok) {
+    } else {
+      log(j, "Validando los modelos configurados para los agentes del pipeline...");
+      const validation = await validateConfiguredModels(j.id);
+      if ((j.status as Status) === "cancelled") return;
+      if (!validation.ok) {
+        log(j, "Validación del modelo fallida: " + validation.message);
+        if (validation.output) log(j, validation.output);
+        j.status = "failed"; j.phase = "Modelo no válido o no disponible";
+        j.lastError = validation.message;
+      } else {
+        log(j, validation.message);
+        const deliveryBeforeState = captureDeliveryReportState(j.directory);
+        const deliveryStartedAtNs = BigInt(Date.now()) * 1_000_000n;
+        const action = route.action === "modify" ? "modifica el proyecto existente" : "construye un proyecto nuevo";
+        const projectPrompt = `Gestiona una solicitud de proyecto: ${action}. Como único punto de entrada, clasifica la complejidad, define stack y pipeline según tus instrucciones, y coordina a los subagentes seleccionados. Mantén todos los cambios dentro de este directorio. Solicitud del usuario: ${j.request}`;
+        log(j, `Factory-manager inicia el pipeline para ${route.action === "modify" ? "modificar el proyecto seleccionado" : "crear el proyecto"}.`);
+        const managerOk = await runAgent(j, "factory-manager", projectPrompt);
+        if ((j.status as Status) === "cancelled") return;
+        if (!managerOk) {
+          j.status = "failed"; j.phase = "Falló Factory-manager";
+        } else {
+          let verify = await verifyProject(j);
+          let attempts = 0;
+          while (!verify.ok && attempts < 3 && j.status === "running") {
             attempts++;
             log(j, `Verificación técnica fallida (intento ${attempts}/3): ${verify.summary.split("\n")[0]}`);
-            if ((j.status as Status) === "cancelled") break;
-            j.phase = `Corrigiendo errores (intento ${attempts}/3)`;
+            j.phase = `Factory-manager corrige errores (intento ${attempts}/3)`;
             save();
-            const correctionPrompt = `Corrige los errores técnicos detectados en el proyecto. Errores y logs disponibles:\n${verify.summary.slice(0, 8000)}\n\nRevisa el código, corrige y vuelve a intentar compilar/ejecutar. No despliegues, no hagas push ni uses secretos.`;
-            const devOk = await runAgent(j, "developer", correctionPrompt);
-            if ((j.status as Status) === "cancelled") break;
-            if (!devOk) { j.status = "failed"; j.phase = "Falló developer (corrección)"; break; }
-            if (tasks.some(t => t[0] === "qa-reviewer")) {
-              const qaOk = await runAgent(j, "qa-reviewer", `Revisa de nuevo el proyecto tras la corrección. Ejecuta build y pruebas; documenta en QA_REPORT.md.`);
-              if ((j.status as Status) === "cancelled") break;
-              if (!qaOk) { j.status = "failed"; j.phase = "Falló qa-reviewer (corrección)"; break; }
-            }
-            const v2 = await verifyProject(j);
-            if (v2.ok) { verify = { ok: true, summary: "Verificación técnica OK tras corrección." }; break; }
-            else verify = v2;
-          }
-        }
-        if ((j.status as Status) !== "failed" && (j.status as Status) !== "cancelled") {
-          if (!verify.ok) {
-            j.status = "needs_intervention";
-            j.phase = "Requiere intervención";
-            j.lastError = verify.summary.slice(0, 3000);
-          } else {
-            // Delivery phase
-            j.phase = "Preparando entrega";
-            save();
-            const deliveryBeforeState = captureDeliveryReportState(j.directory);
-            const deliveryStartedAtNs = BigInt(Date.now()) * 1_000_000n;
-            const delOk = await runAgent(j, "delivery-manager", `Revisa el proyecto final y crea o actualiza DELIVERY_REPORT.md. El archivo debe incluir estos encabezados exactos, cada uno con contenido útil:
-## Funcionalidades
-## Dependencias
-## Variables de entorno
-## Instalación y ejecución
-## Problemas conocidos y limitaciones
-No incluyas valores secretos ni afirmes verificaciones sin evidencia. No modifiques código, no despliegues ni hagas push.`);
+            const correctionPrompt = `Continúa el proyecto existente: la verificación técnica detectó estos problemas. Coordina la corrección con el subagente adecuado según el pipeline aprobado.\n${verify.summary.slice(0, 8000)}\nNo despliegues, no hagas push ni uses secretos.`;
+            const correctionOk = await runAgent(j, "factory-manager", correctionPrompt);
             if ((j.status as Status) === "cancelled") return;
-            const reportPath = path.join(j.directory, "DELIVERY_REPORT.md");
-            const reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, "utf8") : "";
-            const reportFresh = wasDeliveryReportUpdatedSince(j.directory, deliveryStartedAtNs, deliveryBeforeState);
-            const deliveryCompletion = validateDeliveryCompletion(delOk, reportFresh, reportContent);
-            if (!deliveryCompletion.ok) {
-              const reason = !delOk && j.lastError ? j.lastError : deliveryCompletion.error || "Informe de entrega inválido.";
-              j.status = "failed";
-              j.phase = "Falló delivery-manager";
-              j.lastError = reason;
-              log(j, `Motivo del fallo: ${reason}`);
+            if (!correctionOk) { j.status = "failed"; j.phase = "Falló la corrección coordinada por Factory-manager"; break; }
+            verify = await verifyProject(j);
+          }
+          if (j.status === "running") {
+            if (!verify.ok) {
+              j.status = "needs_intervention"; j.phase = "Requiere intervención";
+              j.lastError = verify.summary.slice(0, 3000);
             } else {
-              j.status = "validated";
-              j.phase = "Validado (ver QA_REPORT.md y DELIVERY_REPORT.md)";
+              const reportPath = path.join(j.directory, "DELIVERY_REPORT.md");
+              const reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, "utf8") : "";
+              const reportFresh = wasDeliveryReportUpdatedSince(j.directory, deliveryStartedAtNs, deliveryBeforeState);
+              const deliveryCompletion = validateDeliveryCompletion(true, reportFresh, reportContent);
+              if (!deliveryCompletion.ok) {
+                j.status = "failed"; j.phase = "Falta informe de entrega";
+                j.lastError = deliveryCompletion.error || "Informe de entrega inválido.";
+                log(j, `Motivo del fallo: ${j.lastError}`);
+              } else {
+                j.status = "validated"; j.phase = "Validado (ver QA_REPORT.md y DELIVERY_REPORT.md)";
+              }
             }
           }
         }
       }
-      if (j.status === "running") { j.status = "done"; j.phase = "Revisión terminada (ver QA_REPORT.md)"; }
     }
   } catch (e) {
     if ((j.status as Status) !== "cancelled") { j.status = "failed"; j.phase = "Error de ejecución"; log(j, String(e)); }
@@ -660,6 +612,8 @@ const server = http.createServer(async (req, res) => {
     let input: unknown; try { input = JSON.parse(body); } catch { return reply(res, 400, { error: "JSON inválido" }); }
     const next = normalizeSettings(input);
     if (!next) return reply(res, 400, { error: "Configuración no válida. Usa IDs de modelo con formato proveedor/modelo." });
+    try { syncAgentModelFiles(path.join(ROOT, ".opencode", "agents"), next.agentModels); }
+    catch { return reply(res, 500, { error: "No se pudieron guardar los modelos en los agentes de OpenCode." }); }
     settings = next; saveSettings();
     return reply(res, 200, { ok: true, settings });
   }
@@ -678,7 +632,7 @@ const server = http.createServer(async (req, res) => {
     let input: any; try { input = JSON.parse(body); } catch { return reply(res, 400, { error: "JSON inválido" }); }
     const model = String(input.model || "").trim();
     const agent = input.agent as AgentId;
-    if (!model || !["factory-manager", "developer", "qa-reviewer", "delivery-manager"].includes(agent)) return reply(res, 400, { error: "Modelo o agente no válido" });
+    if (!model || !AGENT_IDS.includes(agent)) return reply(res, 400, { error: "Modelo o agente no válido" });
     const result = await testOpenCodeModel(model, agent);
     let history: any[] = [];
     try { history = JSON.parse(fs.readFileSync(path.join(DATA, "model-tests.json"), "utf8")); } catch {}
@@ -694,22 +648,28 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     if (body === null) return reply(res, 413, { error: "Solicitud demasiado grande" });
     let input: any; try { input = JSON.parse(body); } catch { return reply(res, 400, { error: "JSON inválido" }); }
-    const name = String(input.name || "").trim(), request = String(input.request || "").trim();
-    if (!name || name.length > 55 || request.length < 15 || request.length > 12000) return reply(res, 400, { error: "Nombre o descripción no válidos" });
-    const id = randomUUID().slice(0, 8);
-    let directory = path.join(PROJECTS, slug(name) + "-" + id);
+    const requestedKind = input.requestKind ?? "project";
     const existingInput = typeof input.directory === "string" ? input.directory.trim() : "";
+    const route = routeRequest(requestedKind, existingInput);
+    if (!route) return reply(res, 400, { error: "Tipo de solicitud no válido" });
+    const name = route.kind === "question" ? "Consulta" : String(input.name || "").trim();
+    const request = String(input.request || "").trim();
+    const minRequestLength = route.kind === "question" ? 1 : 15;
+    if (!name || name.length > 55 || request.length < minRequestLength || request.length > 12000) return reply(res, 400, { error: "Nombre o descripción no válidos" });
+    const id = randomUUID().slice(0, 8);
+    let directory = "";
     let existingSafe: string | null = null;
-    let checkpoint = false;
-    if (existingInput) {
+    const checkpoint = route.kind === "project" && route.action === "modify";
+    if (route.kind === "project" && checkpoint) {
       existingSafe = safeProjectPath(existingInput);
       if (!existingSafe) return reply(res, 400, { error: "Directorio no valido o fuera de projects/" });
       directory = existingSafe;
-      checkpoint = true;
-    } else {
+    } else if (route.kind === "project") {
+      directory = path.join(PROJECTS, slug(name) + "-" + id);
       fs.mkdirSync(directory, { recursive: true });
     }
-    const now = stamp(); const j: Job = { id, name, request, status: "queued", phase: checkpoint ? "En cola (modificacion)" : "En cola", createdAt: now, updatedAt: now, directory, logs: [] };
+    const phase = route.kind === "question" ? "En cola (consulta)" : checkpoint ? "En cola (modificacion)" : "En cola";
+    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
     if (checkpoint && existingSafe) {
       try { fs.cpSync(existingSafe, path.join(PROJECTS, `${slug(name)}-${id}-checkpoint`), { recursive: true, errorOnExist: false, force: true }); }
       catch { }

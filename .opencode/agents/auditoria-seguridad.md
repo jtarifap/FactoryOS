@@ -1,5 +1,6 @@
 ---
 description: Auditoría de seguridad. Solo interviene en proyectos de complejidad compleja.
+model: ollama-cloud/beam
 mode: subagent
 temperature: 0.1
 tools:

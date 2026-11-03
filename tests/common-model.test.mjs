@@ -7,14 +7,26 @@ import ts from "typescript";
 // Minimal DOM and HTTP boundary: execute the actual UI without calling paid models.
 async function mount(testResponse = { ok: true }, mode = "independent", initialJobs = []) {
   const elements = [];
+  class ClassList {
+    constructor(element) { this.element = element; }
+    get values() { return new Set(String(this.element.className || "").split(/\s+/).filter(Boolean)); }
+    contains(name) { return this.values.has(name); }
+    toggle(name, force) {
+      const values = this.values;
+      const enabled = force === undefined ? !values.has(name) : !!force;
+      if (enabled) values.add(name); else values.delete(name);
+      this.element.className = [...values].join(" ");
+    }
+  }
   class Element {
     children = []; style = {}; dataset = {}; listeners = {}; attributes = {}; ownText = "";
     value = ""; disabled = false;
-    constructor(tag) { this.tagName = tag; elements.push(this); }
+    constructor(tag) { this.tagName = tag; this.classList = new ClassList(this); elements.push(this); }
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
     append(...children) { children.forEach(child => this.appendChild(child)); }
     replaceChildren(...children) { this.children = []; this.ownText = ""; this.append(...children); }
     setAttribute(name, value) { this.attributes[name] = String(value); }
+    removeAttribute(name) { delete this.attributes[name]; }
     set textContent(value) { this.ownText = String(value); this.children = []; }
     get textContent() { return this.ownText + this.children.map(child => child.textContent).join(""); }
     get options() { return this.children.flatMap(child => child.tagName === "optgroup" ? child.children : [child]); }
@@ -23,14 +35,16 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   }
   const app = new Element("div"); app.id = "app";
   const root = new Element("html");
+  const matches = (element, selector) => selector.startsWith(".")
+    ? String(element.className || "").split(/\s+/).includes(selector.slice(1))
+    : selector.startsWith("#") ? element.id === selector.slice(1) : false;
   const document = {
     documentElement: root,
     body: new Element("body"),
     createElement: tag => new Element(tag),
     getElementById: id => elements.find(el => el.id === id),
-    querySelector: selector => elements.find(el => selector.startsWith("#")
-      ? el.id === selector.slice(1) : selector.startsWith(".")
-        ? el.className === selector.slice(1) : false) || null,
+    querySelector: selector => elements.find(el => matches(el, selector)) || null,
+    querySelectorAll: selector => elements.filter(el => matches(el, selector)),
   };
   let savedTheme = null;
   const storage = {
@@ -75,11 +89,15 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
     .replace('import "./style.css";', "")
     .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "")
     .replace('import { buildModelGroups, type ModelItem } from "./model-select";', "")
+    .replace('import { buildDashboardRows, buildDashboardStats, type DashboardJob } from "./dashboard";', "")
+    .replace('import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from "./navigation";', "")
     .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "")
-    .replace('import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";', "");
+    .replace('import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage, type TokenUsage } from "../shared/token-usage";', "");
   const themeModule = await import("../web/theme.ts");
   const tokenModule = await import("../shared/token-usage.ts");
   const modelSelectModule = await import("../web/model-select.ts");
+  const dashboardModule = await import("../web/dashboard.ts");
+  const navigationModule = await import("../web/navigation.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const mainModule = { exports: {} };
   vm.runInNewContext(js, {
@@ -87,13 +105,26 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
     renderJobSummary: safeDomModule.exports.renderJobSummary,
     renderModelTooltip: safeDomModule.exports.renderModelTooltip,
     buildModelGroups: modelSelectModule.buildModelGroups,
+    buildDashboardRows: dashboardModule.buildDashboardRows,
+    buildDashboardStats: dashboardModule.buildDashboardStats,
+    DEFAULT_VIEW: navigationModule.DEFAULT_VIEW,
+    MENU_ITEMS: navigationModule.MENU_ITEMS,
+    hashForView: navigationModule.hashForView,
+    viewFromHash: navigationModule.viewFromHash,
     readTheme: themeModule.readTheme,
     THEME_STORAGE_KEY: themeModule.THEME_STORAGE_KEY,
     toggleTheme: themeModule.toggleTheme,
     addTokenUsage: tokenModule.addTokenUsage,
     emptyTokenUsage: tokenModule.emptyTokenUsage,
+    formatCost: tokenModule.formatCost,
     formatTokenUsage: tokenModule.formatTokenUsage,
-    document, fetch, window: { innerWidth: 1000, scrollY: 0, localStorage: storage },
+    document, fetch,
+    window: {
+      innerWidth: 1000, scrollY: 0, localStorage: storage,
+      location: { hash: "" },
+      history: { replaceState: () => {} },
+      addEventListener: () => {},
+    },
     Option: class extends Element { constructor(text, value) { super("option"); this.textContent = text; this.value = value; } },
     setInterval: () => 0,
   });
@@ -287,12 +318,30 @@ test("theme toggle sits immediately before the Local / Windows badge", async () 
   const { elements } = await mount();
   const header = elements.find(el => el.tagName === "header");
   const statusGroup = elements.find(el => el.className === "header-status-group");
+  const owner = elements.find(el => el.className === "header-owner");
   const toggle = elements.find(el => el.className === "secondary theme-toggle");
   const badge = elements.find(el => el.className === "chip");
 
   assert.ok(statusGroup, "Missing header status group");
+  assert.ok(owner, "Missing taridev label in the header");
+  assert.equal(owner.ownText, "taridev");
   assert.equal(header.children[1], statusGroup);
-  assert.deepEqual(statusGroup.children, [toggle, badge]);
+  assert.deepEqual(statusGroup.children, [owner, toggle, badge]);
+});
+
+test("the panel shows the sidebar sections and only one view at a time", async () => {
+  const { elements } = await mount();
+  const items = elements.filter(el => el.tagName === "a" && el.dataset.view);
+  assert.deepEqual(items.map(el => el.ownText), ["Dashboard", "Nuevo proyecto", "Trabajos", "Vista previa", "Ajustes"]);
+  assert.deepEqual(items.map(el => el.dataset.view), ["dashboard", "nuevo", "trabajos", "preview", "ajustes"]);
+  assert.deepEqual(items.map(el => el.href), ["#/dashboard", "#/nuevo", "#/trabajos", "#/preview", "#/ajustes"]);
+
+  const views = elements.filter(el => el.className === "view");
+  assert.equal(views.length, 5);
+  const visible = views.filter(view => view.hidden !== true);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].dataset.view, "dashboard");
+  assert.ok(items[0].classList.contains("active"), "the dashboard item should be active");
 });
 
 test("job cards and the panel show token usage", async () => {

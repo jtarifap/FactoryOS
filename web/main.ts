@@ -1,8 +1,10 @@
 ﻿import "./style.css";
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
 import { buildModelGroups, type ModelItem } from "./model-select";
+import { buildDashboardRows, buildDashboardStats, type DashboardJob } from "./dashboard";
+import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from "./navigation";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
-import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";
+import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage, type TokenUsage } from "../shared/token-usage";
 
 type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager" | "disenador" | "auditoria-seguridad";
 type Job = {
@@ -53,6 +55,7 @@ const state = {
   lastJobsSignature: "",
   activeConsultationId: "",
   consultationSelectionInitialized: false,
+  activeView: DEFAULT_VIEW as ViewId,
 };
 
 let consultationOutputField: HTMLTextAreaElement | null = null;
@@ -74,6 +77,8 @@ const els = {
   previewStatus: document.createElement("p"),
   previewLogs: document.createElement("pre"),
   previewFrame: document.createElement("iframe"),
+  dashboardCards: document.createElement("div"),
+  dashboardTable: document.createElement("div"),
 };
 
 function qs<T extends HTMLElement>(sel: string): T {
@@ -88,10 +93,10 @@ function create<K extends keyof HTMLElementTagNameMap>(tag: K, text = ""): HTMLE
   return el;
 }
 
-function panel(title: string): HTMLElement {
+function panel(title?: string): HTMLElement {
   const section = create("section");
   section.className = "panel";
-  section.appendChild(create("h2", title));
+  if (title) section.appendChild(create("h2", title));
   return section;
 }
 
@@ -156,7 +161,7 @@ async function testModel(select: HTMLSelectElement, agent: AgentId, button: HTML
 }
 
 function buildSettingsUI(): HTMLElement {
-  const section = panel("Modelos de IA y configuración");
+  const section = panel();
 
   const toggleRow = create("div");
   toggleRow.className = "actions-inline";
@@ -283,7 +288,7 @@ function buildSettingsUI(): HTMLElement {
 }
 
 function renderJobs(): HTMLElement {
-  const section = panel("Trabajos");
+  const section = panel();
   const refresh = create("button", "Actualizar");
   refresh.className = "secondary";
   refresh.onclick = () => loadJobs();
@@ -295,7 +300,7 @@ function renderJobs(): HTMLElement {
 }
 
 function renderCreateJob(): HTMLElement {
-  const section = panel("Nuevo proyecto / modificar existente");
+  const section = panel();
   const form = document.createElement("form");
   const requestKind = document.createElement("select");
   requestKind.id = "request-kind";
@@ -400,7 +405,7 @@ function renderCreateJob(): HTMLElement {
 }
 
 function renderPreview(): HTMLElement {
-  const section = panel("Vista previa y ZIP");
+  const section = panel();
   const row = create("div");
   row.className = "actions-inline";
 
@@ -534,6 +539,9 @@ function renderHeader(): HTMLElement {
   badge.className = "chip";
   const statusGroup = create("div");
   statusGroup.className = "header-status-group";
+  const owner = create("span", "taridev");
+  owner.className = "header-owner";
+  statusGroup.appendChild(owner);
   statusGroup.appendChild(themeToggle);
   statusGroup.appendChild(badge);
   header.appendChild(left);
@@ -591,7 +599,11 @@ async function loadJobs() {
   const r = await fetch("/api/jobs");
   const jobs = (await r.json()) as Job[];
   const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, j.tokens, (j.logs || []).length]));
-  if (sig === state.lastJobsSignature) return;
+  if (sig === state.lastJobsSignature) {
+    // Los datos no han cambiado: solo se refrescan los tiempos relativos del dashboard.
+    refreshDashboard();
+    return;
+  }
   state.lastJobsSignature = sig;
   state.jobs = jobs;
   const requestKind = document.getElementById("request-kind") as HTMLSelectElement | null;
@@ -706,6 +718,7 @@ async function loadJobs() {
 
     els.jobList.appendChild(card);
   }
+  refreshDashboard();
 }
 
 async function loadProjects() {
@@ -728,14 +741,162 @@ async function loadProjects() {
   if (dirSelect) dirSelect.value = state.projects.some(project => project.name === selectedDirectory) ? selectedDirectory : "";
 }
 
+type ViewMeta = { title: string; subtitle: string };
+
+const VIEWS: Record<ViewId, ViewMeta> = {
+  dashboard: { title: "Dashboard", subtitle: "Estado y coste de IA de cada trabajo" },
+  nuevo: { title: "Nuevo proyecto", subtitle: "Crea un proyecto nuevo, modifica uno existente o lanza una consulta" },
+  trabajos: { title: "Trabajos", subtitle: "Estado, consumo de tokens y registro de cada trabajo" },
+  preview: { title: "Vista previa", subtitle: "Arranca la app generada, deténla o descarga el ZIP del proyecto" },
+  ajustes: { title: "Ajustes", subtitle: "Modelos de IA y configuración de la fábrica" },
+};
+
+/** Menu lateral con las secciones del panel. */
+function renderSidebar(): HTMLElement {
+  const nav = document.createElement("nav");
+  nav.className = "sidebar";
+  nav.setAttribute("aria-label", "Secciones");
+  for (const item of MENU_ITEMS) {
+    const link = document.createElement("a");
+    link.className = "sidebar-item";
+    link.href = hashForView(item.id);
+    link.dataset.view = item.id;
+    link.textContent = item.label;
+    nav.appendChild(link);
+  }
+  return nav;
+}
+
+/** Cabecera de la vista con su titulo y descripcion. */
+function renderViewShell(view: ViewId, content: HTMLElement): HTMLElement {
+  const section = create("section");
+  section.className = "view";
+  section.dataset.view = view;
+  const head = create("div");
+  head.className = "view-head";
+  const heading = create("div");
+  const title = create("h1", VIEWS[view].title);
+  title.className = "view-title";
+  const subtitle = create("p", VIEWS[view].subtitle);
+  subtitle.className = "view-subtitle";
+  heading.append(title, subtitle);
+  head.appendChild(heading);
+  section.append(head, content);
+  return section;
+}
+
+/** Muestra la vista indicada y marca el item activo del menu. */
+function showView(view: ViewId) {
+  state.activeView = view;
+  for (const element of Array.from(document.querySelectorAll<HTMLElement>(".view"))) {
+    element.hidden = element.dataset.view !== view;
+  }
+  for (const element of Array.from(document.querySelectorAll<HTMLAnchorElement>(".sidebar-item"))) {
+    const active = element.dataset.view === view;
+    element.classList.toggle("active", active);
+    if (active) element.setAttribute("aria-current", "page");
+    else element.removeAttribute("aria-current");
+  }
+}
+
+/** Resumen con las cuatro tarjetas y la tabla de trabajos. */
+function renderDashboardView(): HTMLElement {
+  const section = create("section");
+  section.className = "dash";
+  els.dashboardCards.className = "dash-cards";
+  els.dashboardTable.className = "dash-table";
+  section.append(els.dashboardCards, els.dashboardTable);
+  refreshDashboard();
+  return section;
+}
+
+/** Repinta las tarjetas y la tabla con los datos reales de los trabajos. */
+function refreshDashboard() {
+  if (!els.dashboardCards.parentElement) return;
+  const jobs = state.jobs as unknown as DashboardJob[];
+  const stats = buildDashboardStats(jobs);
+  const rows = buildDashboardRows(jobs);
+
+  els.dashboardCards.replaceChildren();
+  const addCard = (label: string, value: string, tone?: string) => {
+    const box = create("div");
+    box.className = "dash-card";
+    const caption = create("div", label);
+    caption.className = "dash-card-label";
+    const amount = create("div", value);
+    amount.className = tone ? `dash-card-value ${tone}` : "dash-card-value";
+    box.append(caption, amount);
+    els.dashboardCards.appendChild(box);
+  };
+  addCard("Activos", String(stats.activos), "accent");
+  addCard("Finalizados", String(stats.finalizados), "ok");
+  addCard("Con error", String(stats.conError), "error");
+  addCard("Coste IA del mes", formatCost(stats.costeMes));
+
+  els.dashboardTable.replaceChildren();
+  if (!rows.length) {
+    const empty = create("p", "Todavia no hay trabajos. Crea uno desde Nuevo proyecto.");
+    empty.className = "hint";
+    els.dashboardTable.appendChild(empty);
+    return;
+  }
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const label of ["Trabajo", "Estado", "Fase", "Coste IA", "Actualizado"]) {
+    headRow.appendChild(create("th", label));
+  }
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const name = create("td", row.name);
+    name.className = "dash-name";
+    const status = document.createElement("td");
+    const chip = create("span", row.status);
+    chip.className = `status-chip tone-${row.tone}`;
+    status.appendChild(chip);
+    const phase = create("td", row.phase);
+    phase.className = "dash-muted dash-phase";
+    phase.title = row.phase;
+    const cost = create("td", formatCost(row.cost));
+    const updated = create("td", row.updated);
+    updated.className = "dash-muted";
+    tr.append(name, status, phase, cost, updated);
+    tbody.appendChild(tr);
+  }
+  table.append(thead, tbody);
+  els.dashboardTable.appendChild(table);
+}
+
 function buildApp() {
-  const main = document.createElement("main");
-  main.appendChild(renderHeader());
-  main.appendChild(buildSettingsUI());
-  main.appendChild(renderCreateJob());
-  main.appendChild(renderJobs());
-  main.appendChild(renderPreview());
-  app.appendChild(main);
+  const shell = create("div");
+  shell.className = "app-shell";
+  shell.appendChild(renderHeader());
+
+  const body = create("div");
+  body.className = "app-body";
+  body.appendChild(renderSidebar());
+
+  const content = document.createElement("main");
+  content.className = "app-content";
+  const views: Record<ViewId, HTMLElement> = {
+    dashboard: renderViewShell("dashboard", renderDashboardView()),
+    nuevo: renderViewShell("nuevo", renderCreateJob()),
+    trabajos: renderViewShell("trabajos", renderJobs()),
+    preview: renderViewShell("preview", renderPreview()),
+    ajustes: renderViewShell("ajustes", buildSettingsUI()),
+  };
+  for (const view of Object.values(views)) content.appendChild(view);
+  body.appendChild(content);
+  shell.appendChild(body);
+  app.appendChild(shell);
+
+  const initial = viewFromHash(window.location.hash);
+  showView(initial);
+  if (!window.location.hash) window.history.replaceState(null, "", hashForView(initial));
+  window.addEventListener("hashchange", () => showView(viewFromHash(window.location.hash)));
 }
 
 buildApp();

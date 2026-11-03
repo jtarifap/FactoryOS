@@ -4,3 +4,6 @@ data/
 projects/
 .env
 *.log
+
+backups/
+

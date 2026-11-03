@@ -1,5 +1,18 @@
 # QA Report - FactoryOS 2.0
 
+## Menu lateral y Dashboard (2026-11-03)
+
+- Referencia de diseño: `web/design/2. Dashboard` (maqueta y PNG exportados). Se replican sus valores (sidebar de 220 px, items con `padding:10px 12px`, activo en `#ff9f1c` con barra izquierda de 2 px, contenido con `padding:28px 32px`) sobre las variables de tema ya existentes, por lo que el tema claro funciona sin duplicar colores.
+- Estructura: cabecera de 52 px a ancho completo (logo, `taridev`, toggle de tema y chip `Local / Windows` a la derecha) y cuerpo con menú lateral fijo + zona de contenido. Se retira el `max-width:1100px` del panel anterior, que quedaba corto con el menú.
+- Menú: Dashboard · Nuevo proyecto · Trabajos · Vista previa · Ajustes. La vista activa se marca en el menú y se guarda en el hash (`#/dashboard`), de modo que sobrevive a una recarga y se puede enlazar.
+- Dashboard con datos reales de `/api/jobs`: tarjetas Activos (queued+running), Finalizados (done+validated), Con error (failed+needs_intervention) y Coste IA del mes (suma de `tokens.cost` de los trabajos actualizados este mes). La tabla lista Trabajo, Estado, Fase, Coste IA y Actualizado.
+- Decision: donde la maqueta pintaba una barra de progreso se muestra la fase real del trabajo. OpenCode no expone un porcentaje y una barra estimada seria un dato inventado.
+- Decision: el coste se mantiene en dolares con `formatCost()` para que cuadre con el resto del panel; la maqueta usaba euros.
+- `npm test`: **170/170 PASS** (nuevos ficheros `tests/navigation.test.mjs` y `tests/dashboard.test.mjs`; `tests/common-model.test.mjs` ampliado con el DOM minimo del menu y la navegacion).
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- Validacion real en navegador: las 5 vistas conmutan sin errores de consola, el item activo se marca, la cabecera muestra `taridev` junto al toggle y al chip, el Dashboard pinta las 4 tarjetas y la tabla con los 6 trabajos reales, y a 1280 px las tarjetas caben en una fila sin desbordar la tabla.
+- Red de seguridad antes de empezar: tag `backup/pre-sidebar-2026-11-03`, rama `backup/pre-sidebar-2026-11-03` y copia `backups/factoryos-pre-sidebar-2026-11-03.zip` (excluye `node_modules`, `.git`, `dist`, `data`, `projects`).
+
 ## Modelos de OpenRouter en el panel (2026-11-03)
 
 - Sintoma: el proveedor `openrouter` no aparecia en el desplegable de modelos aunque su API estuviera activa en la app Desktop de OpenCode.

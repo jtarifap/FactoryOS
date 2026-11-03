@@ -27,6 +27,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 
 - `web/index.html` + `web/landing.css`: landing estática en `/`.
 - `web/app.html` + `web/main.ts`: panel de FactoryOS en `/app.html`.
+- Menú lateral fijo de 220 px con las cinco secciones: **Dashboard**, **Nuevo proyecto**, **Trabajos**, **Vista previa** y **Ajustes**. La vista activa se marca en ámbar con barra izquierda y se refleja en el hash (`#/dashboard`), de modo que una recarga conserva la sección y se puede enlazar directamente.
+- El **Dashboard** resume los trabajos con datos reales de `/api/jobs`: cuatro tarjetas (Activos, Finalizados, Con error y Coste IA del mes) y una tabla con Trabajo, Estado, Fase, Coste IA y Actualizado. El progreso se muestra con la fase real del trabajo porque OpenCode no expone un porcentaje.
 - Los botones **Empezar** y **Crear mi primer proyecto** de la landing abren el panel; el logo del panel vuelve a la landing.
 - Tema claro/oscuro: botón sol/luna junto a **LOCAL / WINDOWS** en el panel y después de **GitHub** en la landing, con persistencia en `localStorage` y oscuro por defecto.
 - `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`.
@@ -98,6 +100,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `shared/`: cálculo y formato de tokens compartido entre servidor y panel.
 - `server/model-list.ts`: parser del catalogo de modelos de OpenCode (ids multi-segmento de proveedores agregadores).
 - `server/opencode-providers.ts`: proveedores conectados en OpenCode (solo identificadores, nunca valores de credencial).
+- `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
+- `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
 - `tests/`: pruebas de API, ZIP, preview y landing.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.

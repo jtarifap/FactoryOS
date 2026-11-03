@@ -15,6 +15,7 @@ function probe() {
   let killed = false;
   const context = vm.createContext({
     Buffer, Date, process, ROOT: ".", OPENCODE_BIN: "opencode.exe",
+    opencodeEnv: () => ({ ...process.env, CI: "1", NO_COLOR: "1", OPENCODE_DB: ":memory:" }),
     spawn: (bin, args, options) => { invocation = { bin, args, options }; return child; },
     killTree: () => { killed = true; }, setTimeout: () => 1, clearTimeout: () => {},
   });

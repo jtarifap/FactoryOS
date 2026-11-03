@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 
 // Minimal DOM and HTTP boundary: execute the actual UI without calling paid models.
-async function mount(testResponse = { ok: true }, mode = "independent") {
+async function mount(testResponse = { ok: true }, mode = "independent", initialJobs = []) {
   const elements = [];
   class Element {
     children = []; style = {}; dataset = {}; listeners = {}; attributes = {}; ownText = "";
@@ -43,7 +43,7 @@ async function mount(testResponse = { ok: true }, mode = "independent") {
     mode, commonModel: "test/model", autoApprove: false,
     agentModels: Object.fromEntries(agentIds.map(id => [id, "test/model"])),
   };
-  let latestJobs = [];
+  let latestJobs = initialJobs;
   const fetch = async (url, options) => {
     calls.push({ url, options });
     if (url === "/api/settings" && options?.method === "PUT") {
@@ -74,8 +74,10 @@ async function mount(testResponse = { ok: true }, mode = "independent") {
   const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8")
     .replace('import "./style.css";', "")
     .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "")
-    .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "");
+    .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "")
+    .replace('import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";', "");
   const themeModule = await import("../web/theme.ts");
+  const tokenModule = await import("../shared/token-usage.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const mainModule = { exports: {} };
   vm.runInNewContext(js, {
@@ -85,6 +87,9 @@ async function mount(testResponse = { ok: true }, mode = "independent") {
     readTheme: themeModule.readTheme,
     THEME_STORAGE_KEY: themeModule.THEME_STORAGE_KEY,
     toggleTheme: themeModule.toggleTheme,
+    addTokenUsage: tokenModule.addTokenUsage,
+    emptyTokenUsage: tokenModule.emptyTokenUsage,
+    formatTokenUsage: tokenModule.formatTokenUsage,
     document, fetch, window: { innerWidth: 1000, scrollY: 0, localStorage: storage },
     Option: class extends Element { constructor(text, value) { super("option"); this.textContent = text; this.value = value; } },
     setInterval: () => 0,
@@ -285,6 +290,26 @@ test("theme toggle sits immediately before the Local / Windows badge", async () 
   assert.ok(statusGroup, "Missing header status group");
   assert.equal(header.children[1], statusGroup);
   assert.deepEqual(statusGroup.children, [toggle, badge]);
+});
+
+test("job cards and the panel show token usage", async () => {
+  const job = {
+    id: "job-token1", name: "Demo tokens", request: "Crea una app", status: "done", phase: "Validado",
+    createdAt: "now", updatedAt: "now", directory: "", logs: [],
+    tokens: { input: 1000, output: 20, reasoning: 5, cacheRead: 200, cacheWrite: 3, total: 1228, cost: 0.01 },
+  };
+  const { elements } = await mount({ ok: true }, "independent", [job]);
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  const tokenLine = elements.find(el => el.className === "token-usage");
+  assert.ok(tokenLine, "Missing per-job token line");
+  assert.match(tokenLine.textContent, /Tokens: 1\.228 tokens/);
+  assert.match(tokenLine.textContent, /entrada 1\.000/);
+  assert.match(tokenLine.textContent, /caché L 200/);
+
+  const totalLine = elements.find(el => el.className === "token-total");
+  assert.ok(totalLine, "Missing global token summary");
+  assert.match(totalLine.textContent, /Consumo total registrado: 1\.228 tokens/);
 });
 
 test("saving uses refreshed common model instead of stale independent selections", async () => {

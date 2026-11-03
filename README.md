@@ -53,7 +53,9 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - El refresco automático conserva el proyecto seleccionado en **Vista previa y ZIP** y en el selector de modificación, mientras el proyecto siga existiendo.
 - Los modelos se obtienen de `opencode models --verbose` y se prueban con `opencode run ... "Responde OK"` (timeout ~90s, con deteccion de cuota, credenciales, rate limit, timeout y retries abortadas cuando aparece un error real).
 - Logs limitados y cancelación desde el panel. Las fases de proyecto tienen un timeout de 20 min; las consultas directas a Factory-manager, de 2 min.
-- Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas). Al reiniciar, jobs en ejecucion -> `failed` + lastError.
+- Cada trabajo muestra su consumo de tokens (entrada, salida, razonamiento y caché) y el coste estimado. El total incluye al Factory-manager y a los subagentes que hayan intervenido, y el panel muestra además el consumo global registrado.
+- Para medir tokens sin mezclar trabajos, cada job usa una base SQLite aislada de OpenCode en `data/opencode/<job-id>.db`; si no se puede leer, se usa el respaldo de eventos `step_finish`. Al terminar un proyecto se escribe `factory/consumo-tokens.md` con el desglose.
+- Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas) y las bases de tokens en `data/opencode/`. Al reiniciar, jobs en ejecucion -> `failed` + lastError.
 - Proyectos generados en `projects/<slug>-<id>/` con README, código, tests, dist, QA_REPORT, ENTREGA y DELIVERY_REPORT.
 - Modificacion de proyectos existentes: endpoint `/api/jobs` acepta `directory` existente + checkpoint automático en `projects/<slug>-<id>-checkpoint`.
 - Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado y symlinks fuera del proyecto.
@@ -75,6 +77,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 ## Seguridad y persistencia
 
 - Jobs cancelados/no terminados -> `failed` al reiniciar, con lastError human-readable.
+- Las bases de tokens de `data/opencode/` contienen sesiones de OpenCode: permanecen en local, no se publican y se eliminan al borrar el trabajo.
 - No se ejecutan comandos fuera de `projects/`.
 - ZIP aplica detección por nombres y fingerprints de alta confianza; no es un escáner universal ni reemplaza la revisión del proyecto.
 - No se hace push ni despliegue sin autorizacion.
@@ -83,7 +86,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 ## Estructura y QA
 
 - `web/`: landing (`index.html`, `landing.css`) y panel (`app.html`, `main.ts`, `style.css`).
-- `server/`: API Node.js/TypeScript.
+- `server/`: API Node.js/TypeScript, ejecución de agentes y lectura del consumo de tokens.
+- `shared/`: cálculo y formato de tokens compartido entre servidor y panel.
 - `tests/`: pruebas de API, ZIP, preview y landing.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.

@@ -1,5 +1,17 @@
 # QA Report — FactoryOS 2.0
 
+## Consumo de tokens por trabajo (2026-11-03)
+
+- Cada trabajo usa una base SQLite aislada de OpenCode en `data/opencode/<job-id>.db`; al terminar cada fase se leen las sesiones del Factory-manager y de todos sus subagentes.
+- El total se acumula en `job.tokens` y se muestra en la tarjeta del trabajo y en el resumen global del panel.
+- Si la base no está disponible (por ejemplo, versión de Node sin `node:sqlite`), se usa el respaldo de eventos `step_finish` del flujo JSON de OpenCode.
+- Al finalizar un proyecto se escribe `factory/consumo-tokens.md` con el desglose y el coste estimado; el ZIP lo incluye.
+- Se eliminó `OPENCODE_DB=:memory:` global: las pruebas y listados de modelos conservan una base en memoria, mientras los trabajos persisten su base aislada.
+- cancelar/borrar un trabajo elimina su base de tokens; un reintento conserva el consumo acumulado de los intentos anteriores.
+- `npm test`: **132/132 PASS** (incluye parser, base SQLite con sesiones padre/hija, cableado del servidor y render de tokens en el panel).
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- Validación real local: una consulta creada por `/api/jobs` terminó `done` con `tokens.total = 7135` (entrada 7038, salida 97) y el trabajo eliminado borró su base aislada.
+
 ## Factory-manager, modelos y consultas (2026-11-02)
 
 - Factory-manager es agente `primary` y `default_agent`; los cinco especialistas son `subagent`.

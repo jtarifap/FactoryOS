@@ -17,6 +17,7 @@
     "include": [
         "server/**/*.ts",
         "web/**/*.ts",
+        "shared/**/*.ts",
         "vite.config.ts"
     ]
 }

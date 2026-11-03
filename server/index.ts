@@ -13,15 +13,37 @@ import { appendVerificationEvidence, getProjectVerification, runProjectChecks, t
 import { captureDeliveryReportState, validateDeliveryCompletion, wasDeliveryReportUpdatedSince } from "./delivery-report.js";
 import { extractOpenCodeText, routeRequest, type RequestKind } from "./request-routing.js";
 import { AGENT_IDS, normalizeAgentModels, syncAgentModelFiles, type AgentId, type AgentModelMap, type ModelMode } from "./agent-model-config.js";
+import { readTokenUsageFromDb } from "./session-usage.js";
+import {
+  addTokenUsage,
+  emptyTokenUsage,
+  formatTokenUsage,
+  parseTokenUsage,
+  tokenUsageMarkdown,
+  type TokenUsage,
+} from "../shared/token-usage.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-process.env.OPENCODE_DB = ":memory:";
 const DATA = path.join(ROOT, "data");
 const PROJECTS = path.join(ROOT, "projects");
 const DB = path.join(DATA, "jobs.json");
 const SETTINGS_FILE = path.join(DATA, "settings.json");
+const OPENCODE_DB_DIR = path.join(DATA, "opencode");
 fs.mkdirSync(DATA, { recursive: true });
 fs.mkdirSync(PROJECTS, { recursive: true });
+fs.mkdirSync(OPENCODE_DB_DIR, { recursive: true });
+
+/** Each job gets an isolated OpenCode database so its token usage includes every subagent. */
+const jobDatabasePath = (jobId: string) => path.join(OPENCODE_DB_DIR, `${jobId}.db`);
+const opencodeEnv = (jobId?: string) => {
+  if (jobId) fs.mkdirSync(OPENCODE_DB_DIR, { recursive: true });
+  return {
+    ...process.env,
+    CI: "1",
+    NO_COLOR: "1",
+    OPENCODE_DB: jobId ? jobDatabasePath(jobId) : ":memory:",
+  };
+};
 
 type Status = "queued" | "running" | "done" | "failed" | "cancelled" | "needs_intervention" | "validated";
 type ModelMeta = {
@@ -41,7 +63,7 @@ type ModelSettings = {
   autoApprove: boolean;
   agentModelConfigVersion: 2;
 };
-type Job = { id: string; name: string; request: string; requestKind?: RequestKind; answer?: string; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
+type Job = { id: string; name: string; request: string; requestKind?: RequestKind; answer?: string; tokens?: TokenUsage; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
 
 const DEFAULT_SETTINGS: ModelSettings = {
   mode: "independent",
@@ -144,7 +166,7 @@ function normalizeSettings(input: any): ModelSettings | null {
 
 function listOpenCodeModels(jobId?: string): Promise<{ ok: boolean; output: string; error?: string }> {
   return new Promise(resolve => {
-    const child = spawn(OPENCODE_BIN, ["models"], { cwd: ROOT, env: { ...process.env, CI: "1", NO_COLOR: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(OPENCODE_BIN, ["models"], { cwd: ROOT, env: opencodeEnv(), shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     if (jobId) jobProcesses.add(jobId, child);
     let output = "";
     let settled = false;
@@ -219,7 +241,7 @@ function parseModelBlocks(output: string): ModelMeta[] {
 function listOpenCodeModelsVerbose(): Promise<{ ok: boolean; models: ModelMeta[]; error?: string }> {
   const bin = OPENCODE_BIN;
   const commandErrorWrapped = new Promise<{ ok: boolean; models: ModelMeta[]; error?: string }>(resolve => {
-    const child = spawn(bin, ["models", "--verbose"], { cwd: ROOT, env: { ...process.env, CI: "1", NO_COLOR: "1" }, shell: bin.endsWith(".cmd") || bin.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, ["models", "--verbose"], { cwd: ROOT, env: opencodeEnv(), shell: bin.endsWith(".cmd") || bin.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let settled = false;
     const finish = (result: { ok: boolean; models: ModelMeta[]; error?: string }) => {
@@ -328,7 +350,7 @@ function testOpenCodeModel(model: string, _agent: AgentId): Promise<{ ok: boolea
     // and the run looks like a silent hang until the timeout.
     // Test the provider, not the factory agent's planning/development instructions.
     const args = ["run", "--model", model, "--agent", "build", "--format", "json", "--print-logs", "--log-level", "ERROR", "Prueba de conexión al modelo. Responde únicamente OK. No uses herramientas, skills ni archivos. No planifiques ni ejecutes tareas del proyecto."];
-    const child = spawn(bin, args, { cwd: ROOT, env: { ...process.env, CI: "1", NO_COLOR: "1" }, shell: bin.endsWith(".cmd") || bin.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, args, { cwd: ROOT, env: opencodeEnv(), shell: bin.endsWith(".cmd") || bin.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let stdout = "";
     let finished = false;
@@ -371,31 +393,98 @@ function testOpenCodeModel(model: string, _agent: AgentId): Promise<{ ok: boolea
   });
 }
 
+/** Keeps job logs readable while OpenCode streams raw JSON events. */
+function openCodeLogLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    const event = JSON.parse(trimmed);
+    if (event?.type === "text" && typeof event.part?.text === "string") {
+      return event.part.text.trim() || null;
+    }
+    if (event?.type === "tool" && typeof event.part?.tool === "string") {
+      const status = typeof event.part?.state?.status === "string" ? ` (${event.part.state.status})` : "";
+      return `[herramienta] ${event.part.tool}${status}`;
+    }
+    if (event?.type === "step_finish") {
+      const usage = parseTokenUsage(trimmed);
+      return usage.total > 0 ? `[tokens] ${formatTokenUsage(usage)}` : null;
+    }
+    if (event?.type === "error") {
+      const message = event.error?.message || event.message;
+      return `[error] ${typeof message === "string" ? message : trimmed}`;
+    }
+    return null;
+  } catch {
+    // Plain stderr lines (warnings, provider errors) stay visible.
+    return line;
+  }
+}
+
+/**
+ * Adds streamed step_finish usage to the job and then prefers the exact
+ * database total, which also includes every subagent session.
+ */
+function recordTokenUsage(j: Job, output: string): TokenUsage {
+  const streamed = parseTokenUsage(output);
+  j.tokens = addTokenUsage(j.tokens ?? emptyTokenUsage(), streamed);
+  const stored = readTokenUsageFromDb(jobDatabasePath(j.id));
+  if (stored) j.tokens = stored;
+  j.updatedAt = stamp();
+  save();
+  return j.tokens;
+}
+
+function writeTokenUsageFile(j: Job): void {
+  if (!j.directory || !j.tokens || j.tokens.total <= 0) return;
+  try {
+    const factoryDir = path.join(j.directory, "factory");
+    fs.mkdirSync(factoryDir, { recursive: true });
+    fs.writeFileSync(path.join(factoryDir, "consumo-tokens.md"), tokenUsageMarkdown(j.tokens), "utf8");
+  } catch {
+    // The project may be read-only or removed; token usage is still shown in the app.
+  }
+}
+
 function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
   return new Promise(resolve => {
     if (j.status === "cancelled") return resolve(false);
     const model = effectiveModel(agent);
     j.phase = `${agent} · ${model}`; save();
-    const args = ["run", "--model", model, "--agent", agent];
+    const args = ["run", "--model", model, "--agent", agent, "--format", "json"];
     if (settings.autoApprove) args.push("--auto");
     args.push(prompt);
-    const child = spawn(OPENCODE_BIN, args, { cwd: j.directory, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(OPENCODE_BIN, args, { cwd: j.directory, env: opencodeEnv(j.id), shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     jobProcesses.add(j.id, child);
     active = { id: j.id, child };
     let finished = false;
+    let rawOutput = "";
     let tailOutput = "";
+    let logBuffer = "";
     const timer = setTimeout(() => { log(j, "Tiempo máximo de fase agotado (20 min)."); killTree(child); }, 20 * 60 * 1000);
+    const flushLogs = (final = false) => {
+      const lines = logBuffer.split(/\r?\n/);
+      logBuffer = final ? "" : lines.pop() || "";
+      for (const line of lines) {
+        const readable = openCodeLogLine(line);
+        if (readable) log(j, readable);
+      }
+    };
     const onData = (d: Buffer) => {
       const text = d.toString("utf8");
+      rawOutput += text;
       tailOutput = (tailOutput + text).slice(-20000);
-      log(j, text);
+      logBuffer += text;
+      flushLogs();
     };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
     child.on("error", e => log(j, "Error al iniciar OpenCode: " + e.message));
     child.on("close", code => {
       if (finished) return; finished = true; clearTimeout(timer); active = null;
-      log(j, `Agente ${agent} · modelo ${model}: salida ${code}`);
+      flushLogs(true);
+      const usage = recordTokenUsage(j, rawOutput);
+      log(j, `Agente ${agent} · modelo ${model}: salida ${code} · ${formatTokenUsage(usage)}`);
       if (code === 0 && j.status !== "cancelled") return resolve(true);
       if (j.status === "cancelled") return resolve(false);
       // Persist the real reason so the UI does not just say "Falló <agent>".
@@ -422,7 +511,7 @@ function runConsultation(j: Job, prompt: string): Promise<{ ok: boolean; output:
     if (j.status === "cancelled") return resolve({ ok: false, output: "" });
     const model = effectiveModel("factory-manager");
     j.phase = `factory-manager · ${model}`; save();
-    const child = spawn(OPENCODE_BIN, ["run", "--model", model, "--agent", "factory-manager", "--format", "json", prompt], { cwd: j.directory || ROOT, env: { ...process.env, CI: "1" }, shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(OPENCODE_BIN, ["run", "--model", model, "--agent", "factory-manager", "--format", "json", prompt], { cwd: j.directory || ROOT, env: opencodeEnv(j.id), shell: OPENCODE_BIN.endsWith(".cmd") || OPENCODE_BIN.endsWith(".bat"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     jobProcesses.add(j.id, child);
     let output = "";
     let done = false;
@@ -431,9 +520,17 @@ function runConsultation(j: Job, prompt: string): Promise<{ ok: boolean; output:
     const onData = (d: Buffer) => { output += d.toString("utf8"); };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
-    child.on("error", e => { if (done) return; done = true; clearTimeout(timer); log(j, "Error al iniciar OpenCode: " + e.message); resolve({ ok: false, output }); });
+    child.on("error", e => {
+      if (done) return; done = true; clearTimeout(timer);
+      log(j, "Error al iniciar OpenCode: " + e.message);
+      const usage = recordTokenUsage(j, output);
+      if (usage.total > 0) log(j, `Consumo de la consulta: ${formatTokenUsage(usage)}`);
+      resolve({ ok: false, output });
+    });
     child.on("close", code => {
       if (done) return; done = true; clearTimeout(timer);
+      const usage = recordTokenUsage(j, output);
+      if (usage.total > 0) log(j, `Consumo de la consulta: ${formatTokenUsage(usage)}`);
       if (code === 0 && !timedOut && j.status !== "cancelled") return resolve({ ok: true, output });
       log(j, timedOut ? "Factory-manager superó el límite de 120 segundos." : output.slice(-5000) || `Factory-manager terminó con código ${code}.`);
       resolve({ ok: false, output });
@@ -578,6 +675,9 @@ async function worker() {
     if ((j.status as Status) !== "cancelled") { j.status = "failed"; j.phase = "Error de ejecución"; log(j, String(e)); }
   } finally {
     await jobProcesses.finish(j.id);
+    const stored = readTokenUsageFromDb(jobDatabasePath(j.id));
+    if (stored) j.tokens = stored;
+    writeTokenUsageFile(j);
     j.updatedAt = stamp(); save();
     releaseWorker();
     if (jobs.some(job => job.status === "queued")) setImmediate(worker);
@@ -643,7 +743,16 @@ const server = http.createServer(async (req, res) => {
     saveSettings();
     return reply(res, result.ok ? 200 : 422, result);
   }
-  if (u.pathname === "/api/jobs" && req.method === "GET") return reply(res, 200, jobs.map(x => ({ ...x, request: x.request.slice(0, 1000) })).reverse());
+  if (u.pathname === "/api/jobs" && req.method === "GET") {
+    // A running job's database is updated by OpenCode while the pipeline works.
+    // Reading it on each poll keeps the token counter live without extra processes.
+    for (const job of jobs) {
+      if (job.status !== "running") continue;
+      const stored = readTokenUsageFromDb(jobDatabasePath(job.id));
+      if (stored) job.tokens = stored;
+    }
+    return reply(res, 200, jobs.map(x => ({ ...x, request: x.request.slice(0, 1000) })).reverse());
+  }
   if (u.pathname === "/api/jobs" && req.method === "POST") {
     const body = await readBody(req);
     if (body === null) return reply(res, 413, { error: "Solicitud demasiado grande" });
@@ -669,7 +778,7 @@ const server = http.createServer(async (req, res) => {
       fs.mkdirSync(directory, { recursive: true });
     }
     const phase = route.kind === "question" ? "En cola (consulta)" : checkpoint ? "En cola (modificacion)" : "En cola";
-    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
+    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, tokens: emptyTokenUsage(), status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
     if (checkpoint && existingSafe) {
       try { fs.cpSync(existingSafe, path.join(PROJECTS, `${slug(name)}-${id}-checkpoint`), { recursive: true, errorOnExist: false, force: true }); }
       catch { }
@@ -704,7 +813,11 @@ const server = http.createServer(async (req, res) => {
     const index = jobs.findIndex(x => x.id === deleteMatch[1]);
     if (index === -1) return reply(res, 404, { error: "No encontrado" });
     if (["queued", "running"].includes(jobs[index].status)) return reply(res, 409, { error: "Cancela el trabajo antes de borrarlo" });
+    const jobId = jobs[index].id;
     jobs.splice(index, 1); save();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try { fs.rmSync(jobDatabasePath(jobId) + suffix, { force: true }); } catch {}
+    }
     return reply(res, 200, { ok: true });
   }
   if (await handlePreview(req, res, u)) return;

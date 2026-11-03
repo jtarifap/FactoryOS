@@ -1,6 +1,7 @@
 ﻿import "./style.css";
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
+import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";
 
 type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager" | "disenador" | "auditoria-seguridad";
 type Job = {
@@ -9,6 +10,7 @@ type Job = {
   request: string;
   requestKind?: "project" | "question";
   answer?: string;
+  tokens?: TokenUsage;
   status: string;
   phase: string;
   createdAt: string;
@@ -595,7 +597,7 @@ async function loadModels() {
 async function loadJobs() {
   const r = await fetch("/api/jobs");
   const jobs = (await r.json()) as Job[];
-  const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, (j.logs || []).length]));
+  const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, j.tokens, (j.logs || []).length]));
   if (sig === state.lastJobsSignature) return;
   state.lastJobsSignature = sig;
   state.jobs = jobs;
@@ -610,6 +612,12 @@ async function loadJobs() {
       || (consultation && ["queued", "running"].includes(consultation.status) ? "Consultando..." : "");
   }
   els.jobList.innerHTML = "";
+  const totalTokens = jobs.reduce((total, job) => addTokenUsage(total, job.tokens ?? emptyTokenUsage()), emptyTokenUsage());
+  if (totalTokens.total > 0) {
+    const total = create("p", `Consumo total registrado: ${formatTokenUsage(totalTokens)}`);
+    total.className = "token-total";
+    els.jobList.appendChild(total);
+  }
 
   for (const job of jobs) {
     const card = document.createElement("article");
@@ -618,6 +626,16 @@ async function loadJobs() {
 
     const meta = create("small", `ID: ${job.id} · Actualizado: ${job.updatedAt}`);
     card.appendChild(meta);
+
+    if (job.tokens && job.tokens.total > 0) {
+      const tokens = create("div", `Tokens: ${formatTokenUsage(job.tokens)}`);
+      tokens.className = "token-usage";
+      card.appendChild(tokens);
+    } else if (job.status === "queued" || job.status === "running") {
+      const tokens = create("div", "Tokens: en curso");
+      tokens.className = "token-usage pending";
+      card.appendChild(tokens);
+    }
 
     const req = create("p", job.request);
     req.className = "hint";

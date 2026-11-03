@@ -100,8 +100,12 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `shared/`: cálculo y formato de tokens compartido entre servidor y panel.
 - `server/model-list.ts`: parser del catalogo de modelos de OpenCode (ids multi-segmento de proveedores agregadores).
 - `server/opencode-providers.ts`: proveedores conectados en OpenCode (solo identificadores, nunca valores de credencial).
+- Vista previa: el botón **Arrancar** levanta la app del proyecto seleccionado. El script se elige del `package.json` por orden de preferencia (`dev`, `start`, `preview`, `serve`, `watch`); si faltan las dependencias se ejecuta `npm install` antes. El puerto real de la app se deduce de su salida (no todas respetan `PORT`) y la URL definitiva se comprueba antes de mostrarla. El campo **Argumentos extra** añade flags al script (`--host 0.0.0.0 --port 4000`).
+- Si la app no arranca, la vista previa muestra el error y los logs del proceso en lugar de un frame vacío; el enlace **Abrir la app en una pestaña nueva** permite verla fuera del panel.
+- La vista previa estática (proyectos sin `package.json` con `index.html`) se sirve desde la API con una URL absoluta, de modo que el iframe muestra siempre la app y no la landing de FactoryOS.
 - `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
+- `server/preview-plan.ts`: elección de script, argumentos y detección del puerto de la app en la vista previa.
 - `tests/`: pruebas de API, ZIP, preview y landing.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.

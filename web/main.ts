@@ -77,6 +77,8 @@ const els = {
   previewStatus: document.createElement("p"),
   previewLogs: document.createElement("pre"),
   previewFrame: document.createElement("iframe"),
+  previewArgs: document.createElement("input"),
+  previewLink: document.createElement("a"),
   dashboardCards: document.createElement("div"),
   dashboardTable: document.createElement("div"),
 };
@@ -421,34 +423,63 @@ function renderPreview(): HTMLElement {
   row.appendChild(stop);
   row.appendChild(zip);
 
+  const argsLabel = create("label", "Argumentos extra del script (opcional)");
+  els.previewArgs.id = "preview-args";
+  els.previewArgs.placeholder = "--host 0.0.0.0 --port 4000";
+  els.previewArgs.autocomplete = "off";
+  argsLabel.appendChild(els.previewArgs);
+
   els.previewStatus.className = "hint";
   els.previewLogs.textContent = "";
   els.previewFrame.style.width = "100%";
   els.previewFrame.style.height = "420px";
   els.previewFrame.style.border = "0";
   els.previewFrame.hidden = true;
+  els.previewFrame.title = "Vista previa de la app";
+  els.previewLink.className = "preview-link";
+  els.previewLink.hidden = true;
+  els.previewLink.target = "_blank";
+  els.previewLink.rel = "noopener";
 
   section.appendChild(row);
+  section.appendChild(argsLabel);
   section.appendChild(els.previewStatus);
+  section.appendChild(els.previewLink);
   section.appendChild(els.previewFrame);
   section.appendChild(els.previewLogs);
 
   start.onclick = async () => {
     const dir = els.projectSelect.value;
-    if (!dir) return;
-    els.previewStatus.textContent = "Arrancando...";
+    if (!dir) {
+      els.previewStatus.textContent = "Selecciona primero un proyecto.";
+      return;
+    }
+    els.previewStatus.textContent = "Arrancando la app (puede tardar si hay que instalar dependencias)...";
+    els.previewLink.hidden = true;
     const r = await fetch("/api/preview/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ directory: dir }),
+      body: JSON.stringify({ directory: dir, args: els.previewArgs.value }),
     });
     const data = await r.json();
     if (!r.ok) {
       els.previewStatus.textContent = data.error || "No se pudo arrancar la vista previa";
+      els.previewFrame.hidden = true;
+      els.previewFrame.removeAttribute("src");
+      els.previewLink.hidden = true;
+      els.previewLogs.textContent = Array.isArray(data.logs) ? data.logs.join("\n") : "";
       return;
     }
-    els.previewStatus.textContent = data.mode === "static" ? `Vista previa estática: ${data.url}` : `Vista previa activa: ${data.url}`;
+    const script = data.script ? ` (script: ${data.script})` : "";
+    els.previewStatus.textContent = data.mode === "static"
+      ? `Vista previa estatica: ${data.url}`
+      : `Vista previa activa${script}: ${data.url}`;
+    els.previewLink.href = data.url;
+    els.previewLink.textContent = "Abrir la app en una pestana nueva";
+    els.previewLink.hidden = false;
     if (data.url) {
+      // Clearing it first forces a reload when the same project is started again.
+      els.previewFrame.removeAttribute("src");
       els.previewFrame.src = data.url;
       els.previewFrame.hidden = false;
     }
@@ -466,6 +497,7 @@ function renderPreview(): HTMLElement {
     els.previewStatus.textContent = "Vista previa detenida.";
     els.previewFrame.hidden = true;
     els.previewFrame.removeAttribute("src");
+    els.previewLink.hidden = true;
   };
 
   zip.onclick = async () => {

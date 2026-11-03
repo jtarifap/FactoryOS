@@ -1,5 +1,18 @@
 # QA Report - FactoryOS 2.0
 
+## Vista previa: la app no se ve en el frame (2026-11-03)
+
+- Sintoma: al seleccionar un proyecto y pulsar **Arrancar**, el frame mostraba la web de FactoryOS en lugar de la app del proyecto.
+- Causa 1 (routing): la URL de la vista previa estatica era relativa (`/preview-static/<proyecto>/`), asi que el iframe la pedia al origen del panel (Vite, 5173), donde Vite responde con su propia `index.html` (la landing). Medido: via 5177 el titulo era "FactoryOS - fabrica autonoma de software"; via 4177 (la API) era "Jorge Tarifa - Dev & IA". El proxy de Vite solo reenviaba `/api`. Correccion: la API devuelve ahora una URL absoluta a su propio origen y Vite proxya tambien `/preview-static`.
+- Causa 2 (puerto): se asignaba un puerto libre pero no se garantizaba que la app lo usara. `vite` ignora la variable `PORT` y solo acepta `--port`, y un `node dist/server.js` puede fijar el suyo. Medido: la app escuchaba en 3000 y la API devolvia `http://localhost:60605/`, un puerto sin nadie detras. Correccion: se deduce el puerto real de la salida del proceso, se comprueban los puertos habituales si la app es silenciosa y se verifica la URL antes de responder. El tiempo de espera bajo de 62 s a 3 s.
+- Causa 3 (script y BOM): solo se aceptaban `start`, `dev` y `preview`, y un `package.json` con marca BOM de Windows devolvia "package.json invalido". Correccion: `server/preview-plan.ts` elige entre `dev`, `start`, `preview`, `serve` y `watch`, y parsea el JSON tolerando el BOM.
+- Causa 4 (dependencias): sin `node_modules` la app no arrancaba y no se decia por que. Correccion: se ejecuta `npm install` antes de arrancar y se informa si falla.
+- Causa 5 (Detener): el boton **Detener** no mataba la app. `killTree` lanzaba `taskkill /T /F` y acto seguido `proc.kill()`, que mataba el envoltorio antes de que taskkill pudiera recorrer el arbol; el proceso `node` quedaba huerfano y seguia escuchando. Se comprueba que el `server/job-coordinator.ts` ya resolvia esa misma carrera y se aplica alli el mismo patron.
+- Mejoras de la vista: campo **Argumentos extra** para pasar flags al script, enlace **Abrir la app en una pestana nueva**, y los logs del proceso visibles cuando la app no arranca.
+- `npm test`: **182/182 PASS** (nuevos ficheros `tests/preview-plan.test.mjs` y `tests/preview-kill.test.mjs`).
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- Validacion real: app de prueba con script `start` que ignora `PORT` y escucha en 3000 -> la API devuelve `http://127.0.0.1:3000/` en 3 s y **Detener** libera el puerto sin dejar procesos. App con script `dev` -> recibe `--port` y los argumentos extra (`node server.js --host 127.0.0.1 --port 49205`). Proyecto estatico -> el iframe muestra la landing del proyecto ("Construyo el futuro, linea a linea") y no la de FactoryOS. Sin errores de consola.
+
 ## Menu lateral y Dashboard (2026-11-03)
 
 - Referencia de diseño: `web/design/2. Dashboard` (maqueta y PNG exportados). Se replican sus valores (sidebar de 220 px, items con `padding:10px 12px`, activo en `#ff9f1c` con barra izquierda de 2 px, contenido con `padding:28px 32px`) sobre las variables de tema ya existentes, por lo que el tema claro funciona sin duplicar colores.

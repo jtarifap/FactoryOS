@@ -48,5 +48,7 @@
 .status-chip.tone-ok::before{background:var(--ok)}
 .status-chip.tone-error::before{background:var(--error)}
 .status-chip.tone-muted::before{background:var(--border)}
+.preview-link{display:inline-block;margin-top:6px;color:var(--accent);font-size:13px;text-decoration:underline}
+.preview-link:hover{color:var(--text)}
 
 @media (max-width:900px){.sidebar{width:168px;flex-basis:168px}.app-content{padding:20px 18px}.dash-card{flex-basis:140px}}

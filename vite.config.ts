@@ -7,7 +7,11 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
-    proxy: { "/api": "http://127.0.0.1:4177" }
+    proxy: {
+      "/api": "http://127.0.0.1:4177",
+      // The static preview is served by the API server, not by Vite.
+      "/preview-static": "http://127.0.0.1:4177"
+    }
   },
   build: {
     outDir: "../dist",

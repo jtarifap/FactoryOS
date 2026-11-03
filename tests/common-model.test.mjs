@@ -74,16 +74,19 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8")
     .replace('import "./style.css";', "")
     .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "")
+    .replace('import { buildModelGroups, type ModelItem } from "./model-select";', "")
     .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "")
     .replace('import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";', "");
   const themeModule = await import("../web/theme.ts");
   const tokenModule = await import("../shared/token-usage.ts");
+  const modelSelectModule = await import("../web/model-select.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const mainModule = { exports: {} };
   vm.runInNewContext(js, {
     module: mainModule, exports: mainModule.exports,
     renderJobSummary: safeDomModule.exports.renderJobSummary,
     renderModelTooltip: safeDomModule.exports.renderModelTooltip,
+    buildModelGroups: modelSelectModule.buildModelGroups,
     readTheme: themeModule.readTheme,
     THEME_STORAGE_KEY: themeModule.THEME_STORAGE_KEY,
     toggleTheme: themeModule.toggleTheme,

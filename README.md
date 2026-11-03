@@ -67,12 +67,20 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - /api/health - estado
 - /api/settings - config persistida (GET/PUT) incluye autoApprove
 - /api/models - lista de modelos con metadata
+- /api/models/providers - proveedores conectados en OpenCode y los que aun no ve FactoryOS
 - /api/models/test - prueba individual de modelo
 - /api/jobs - lista/crea/modifica trabajos (con delete/retry/cancel)
 - /api/projects - listado de proyectos
 - /api/projects/zip?directory=<slug> - descarga ZIP
 - /api/preview/start|stop|status - gestion de apps generadas
 - /preview-static/:slug/* - archivos estaticos protegidos
+
+## Proveedores y credenciales de OpenCode
+
+- El panel lista los modelos que ve el CLI de OpenCode (`opencode models --verbose`), agrupados por proveedor. Los agregadores como OpenRouter exponen ids con varios segmentos (`openrouter/openai/gpt-4.1`, `openrouter/~anthropic/claude-opus-latest`, `openrouter/thinkingmachines/inkling:free`): el panel los reconoce, los deja seleccionar y los escribe tal cual en el `model:` de cada agente.
+- Las credenciales las guarda OpenCode, no FactoryOS. La app Desktop las escribe en su propia base SQLite y el CLI en `~/.local/share/opencode/auth.json`; FactoryOS no lee ni copia ningun valor de clave.
+- Para que un proveedor añadido en la app Desktop aparezca en el panel, conectalo tambien en el CLI: `opencode auth login --provider <id>`. El panel avisa en Ajustes de los proveedores que siguen sin verse y del comando exacto para conectarlos.
+- Comprobacion: `opencode auth list` debe listar el proveedor y `opencode models` debe mostrar sus modelos.
 
 ## Seguridad y persistencia
 
@@ -88,6 +96,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/`: landing (`index.html`, `landing.css`) y panel (`app.html`, `main.ts`, `style.css`).
 - `server/`: API Node.js/TypeScript, ejecución de agentes y lectura del consumo de tokens.
 - `shared/`: cálculo y formato de tokens compartido entre servidor y panel.
+- `server/model-list.ts`: parser del catalogo de modelos de OpenCode (ids multi-segmento de proveedores agregadores).
+- `server/opencode-providers.ts`: proveedores conectados en OpenCode (solo identificadores, nunca valores de credencial).
 - `tests/`: pruebas de API, ZIP, preview y landing.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.

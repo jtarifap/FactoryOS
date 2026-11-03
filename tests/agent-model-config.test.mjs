@@ -66,6 +66,31 @@ test("invalid agent model IDs reject the complete settings payload", () => {
   }), null);
 });
 
+test("aggregator model IDs with several segments are accepted", () => {
+  const result = normalizeAgentModels("independent", "openrouter/openai/gpt-4.1", {
+    developer: "openrouter/~anthropic/claude-opus-latest",
+    "qa-reviewer": "openrouter/thinkingmachines/inkling:free",
+  });
+  assert.equal(result?.commonModel, "openrouter/openai/gpt-4.1");
+  assert.equal(result?.agentModels.developer, "openrouter/~anthropic/claude-opus-latest");
+  assert.equal(result?.agentModels["qa-reviewer"], "openrouter/thinkingmachines/inkling:free");
+  assert.equal(result?.agentModels["delivery-manager"], "openrouter/openai/gpt-4.1");
+});
+
+test("an agent model without a provider segment is rejected", () => {
+  assert.equal(normalizeAgentModels("common", "openrouter", {}), null);
+  assert.equal(normalizeAgentModels("independent", "provider/fallback", {
+    developer: "openrouter",
+  }), null);
+});
+
+test("aggregator model IDs are written to the agent frontmatter", () => {
+  const source = "---\ndescription: Test agent\nmode: subagent\n---\nPrompt body stays intact.\n";
+  const updated = updateAgentModelFrontmatter(source, "openrouter/openai/gpt-4.1");
+  assert.match(updated, /^model: openrouter\/openai\/gpt-4\.1$/m);
+  assert.ok(updated.endsWith("Prompt body stays intact.\n"));
+});
+
 test("sync writes each selected model while preserving each agent prompt", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "factoryos-agent-models-"));
   try {

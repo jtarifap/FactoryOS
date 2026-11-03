@@ -13,6 +13,8 @@ import { appendVerificationEvidence, getProjectVerification, runProjectChecks, t
 import { captureDeliveryReportState, validateDeliveryCompletion, wasDeliveryReportUpdatedSince } from "./delivery-report.js";
 import { extractOpenCodeText, routeRequest, type RequestKind } from "./request-routing.js";
 import { AGENT_IDS, normalizeAgentModels, syncAgentModelFiles, type AgentId, type AgentModelMap, type ModelMode } from "./agent-model-config.js";
+import { mergeModelLists, modelsFromCatalog, parseModelBlocks, type ModelMeta } from "./model-list.js";
+import { findOpenCodeDbPath, missingProviders, readConnectedProviderIds } from "./opencode-providers.js";
 import { readTokenUsageFromDb } from "./session-usage.js";
 import {
   addTokenUsage,
@@ -46,15 +48,6 @@ const opencodeEnv = (jobId?: string) => {
 };
 
 type Status = "queued" | "running" | "done" | "failed" | "cancelled" | "needs_intervention" | "validated";
-type ModelMeta = {
-  id: string;
-  name: string;
-  providerID: string;
-  status?: string;
-  capabilities?: { reasoning: boolean; input: { text: boolean; image: boolean; audio: boolean; pdf: boolean; video: boolean } };
-  limit?: { context: number; output: number };
-  cost?: { input: number; output: number };
-};
 type ModelSettings = {
   mode: ModelMode;
   commonModel: string;
@@ -193,50 +186,29 @@ async function validateConfiguredModels(jobId?: string): Promise<{ ok: boolean; 
   return { ok: true, models: required, message: "Todos los modelos configurados aparecen en `opencode models`." };
 }
 
-function parseModelBlocks(output: string): ModelMeta[] {
-  const clean = output.replace(/\u001b\[[0-9;]*m/g, "");
-  const lines = clean.split(/\r?\n/);
-  const blocks: { id: string; json: string }[] = [];
-  let currentId = "";
-  let currentJson = "";
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const match = trimmed.match(/^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/);
-    if (match && !trimmed.startsWith("{") && !trimmed.startsWith('"')) {
-      if (currentId && currentJson) blocks.push({ id: currentId, json: currentJson });
-      currentId = trimmed;
-      currentJson = "";
-    } else if (currentId) {
-      currentJson += line + "\n";
-    }
+/** Models cached by OpenCode from the models.dev catalog. */
+const catalogModels = (): ModelMeta[] => {
+  const cachePath = path.join(os.homedir(), ".cache", "opencode", "models.json");
+  if (!fs.existsSync(cachePath)) return [];
+  try {
+    return modelsFromCatalog(JSON.parse(fs.readFileSync(cachePath, "utf8")));
+  } catch {
+    return [];
   }
-  if (currentId && currentJson) blocks.push({ id: currentId, json: currentJson });
-  const result: ModelMeta[] = [];
-  for (const b of blocks) {
-    try {
-      const data = JSON.parse(b.json.trim());
-      result.push({
-        id: b.id,
-        name: typeof data.name === "string" ? data.name : b.id,
-        providerID: typeof data.providerID === "string" ? data.providerID : b.id.split("/")[0],
-        status: typeof data.status === "string" ? data.status : undefined,
-        capabilities: data.capabilities ? {
-          reasoning: !!data.capabilities.reasoning,
-          input: {
-            text: !!data.capabilities.input?.text,
-            image: !!data.capabilities.input?.image,
-            audio: !!data.capabilities.input?.audio,
-            pdf: !!data.capabilities.input?.pdf,
-            video: !!data.capabilities.input?.video
-          }
-        } : undefined,
-        limit: data.limit ? { context: Number(data.limit.context) || 0, output: Number(data.limit.output) || 0 } : undefined,
-        cost: data.cost ? { input: Number(data.cost.input) || 0, output: Number(data.cost.output) || 0 } : undefined
-      });
-    } catch {}
-  }
-  return result;
-}
+};
+
+/** Catalog models of the given providers, used to complete the CLI listing. */
+const catalogModelsFor = (providers: string[]): ModelMeta[] => {
+  if (!providers.length) return [];
+  const known = new Set(providers);
+  return catalogModels().filter(model => known.has(model.providerID));
+};
+
+/** Providers the user connected in OpenCode, read from its own database. */
+const connectedProviders = (): string[] => {
+  const dbPath = findOpenCodeDbPath();
+  return dbPath ? readConnectedProviderIds(dbPath) : [];
+};
 
 function listOpenCodeModelsVerbose(): Promise<{ ok: boolean; models: ModelMeta[]; error?: string }> {
   const bin = OPENCODE_BIN;
@@ -261,42 +233,11 @@ function listOpenCodeModelsVerbose(): Promise<{ ok: boolean; models: ModelMeta[]
   return (async () => {
     const result = await commandErrorWrapped;
     if (result.ok) return result;
-    const cachePath = path.join(os.homedir(), ".cache", "opencode", "models.json");
-    if (!fs.existsSync(cachePath)) return result;
-    try {
-      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
-      const flat: ModelMeta[] = [];
-      for (const provider of Object.values(cache || {})) {
-        const providerID = typeof (provider as any)?.id === "string" ? (provider as any).id : "";
-        const models = (provider as any)?.models;
-        if (!models || typeof models !== "object") continue;
-        for (const [modelId, info] of Object.entries(models)) {
-          const id = typeof (info as any)?.id === "string" ? (info as any).id : (typeof (info as any)?.canonical_model_id === "string" ? (info as any).canonical_model_id : modelId);
-          if (!id || !id.includes("/")) continue;
-          flat.push({
-            id,
-            name: typeof (info as any)?.name === "string" ? (info as any).name : id,
-            providerID: typeof (info as any)?.providerID === "string" ? (info as any).providerID : (providerID || id.split("/")[0]),
-            status: typeof (info as any)?.status === "string" ? (info as any).status : undefined,
-            capabilities: (info as any)?.capabilities ? {
-              reasoning: !!(info as any).capabilities.reasoning,
-              input: {
-                text: !!(info as any).capabilities.input?.text,
-                image: !!(info as any).capabilities.input?.image,
-                audio: !!(info as any).capabilities.input?.audio,
-                pdf: !!(info as any).capabilities.input?.pdf,
-                video: !!(info as any).capabilities.input?.video
-              }
-            } : undefined,
-            limit: (info as any)?.limit ? { context: Number((info as any).limit.context) || 0, output: Number((info as any).limit.output) || 0 } : undefined,
-            cost: (info as any)?.cost ? { input: Number((info as any).cost.input) || 0, output: Number((info as any).cost.output) || 0 } : undefined
-          });
-        }
-      }
-      return { ok: true, models: flat };
-    } catch {
-      return result;
-    }
+    // The CLI failed: complete the listing with the catalog of the connected providers.
+    const fallback = catalogModelsFor(connectedProviders());
+    const merged = mergeModelLists(result.models, fallback);
+    if (merged.length) return { ok: true, models: merged };
+    return result;
   })();
 }
 
@@ -725,6 +666,12 @@ const server = http.createServer(async (req, res) => {
     const result = await listOpenCodeModelsVerbose();
     if (!result.ok) return reply(res, 500, { error: result.error || "No se pudieron obtener modelos", models: result.models });
     return reply(res, 200, { models: result.models });
+  }
+  if (u.pathname === "/api/models/providers" && req.method === "GET") {
+    const connected = connectedProviders();
+    const listed = await listOpenCodeModelsVerbose();
+    const visible = [...new Set(listed.models.map(model => model.providerID))];
+    return reply(res, 200, { connected, visible, missing: missingProviders(visible, connected) });
   }
   if (u.pathname === "/api/models/test" && req.method === "POST") {
     const body = await readBody(req, 1000);

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isModelId } from "./model-list.js";
 
 export const AGENT_IDS = [
   "factory-manager",
@@ -13,9 +14,6 @@ export const AGENT_IDS = [
 export type AgentId = typeof AGENT_IDS[number];
 export type ModelMode = "common" | "independent";
 export type AgentModelMap = Record<AgentId, string>;
-
-const isModelId = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= 160 && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:-]+$/.test(value.trim());
 
 export function normalizeAgentModels(
   mode: unknown,

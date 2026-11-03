@@ -1,4 +1,16 @@
-# QA Report — FactoryOS 2.0
+# QA Report - FactoryOS 2.0
+
+## Modelos de OpenRouter en el panel (2026-11-03)
+
+- Sintoma: el proveedor `openrouter` no aparecia en el desplegable de modelos aunque su API estuviera activa en la app Desktop de OpenCode.
+- Causa 1 (parseo): el parser de `opencode models --verbose` solo aceptaba ids `provider/model`. Los ids de OpenRouter tienen un segmento mas y caracteres `~` y `:` (`openrouter/openai/gpt-4.1`, `openrouter/~anthropic/claude-opus-latest`, `openrouter/thinkingmachines/inkling:free`), asi que se descartaban y ademas contaminaban el JSON del modelo anterior. Medido sobre la salida real: 171 bloques, 164 correctos, 7 corruptos, 0 de openrouter.
+- Causa 2 (validacion): la validacion de ids de `agent-model-config` rechazaba esos ids, por lo que la seleccion no podia guardarse ni escribirse en los agentes.
+- Causa 3 (credenciales): el CLI que lanza FactoryOS lee `~/.local/share/opencode/auth.json`, mientras la app Desktop guarda las claves en su base SQLite (`credential`). El CLI no ve las de la app Desktop hasta conectarlas con `opencode auth login --provider <id>`. FactoryOS no lee ni copia ningun valor de credencial.
+- Cambios: `server/model-list.ts` (parser tolerante a bloques, ids multi-segmento, catalogo con prefijo de proveedor y sin modelos deprecados), `server/agent-model-config.ts` (validacion compartida), `server/opencode-providers.ts` + `/api/models/providers` (proveedores conectados en OpenCode, solo identificadores), `web/model-select.ts` + `web/main.ts` (agrupacion por proveedor, modelo configurado que no esta en el catalogo visible como "no disponible", aviso de proveedores sin conectar).
+- `npm test`: **155/155 PASS** (nuevos ficheros `tests/model-list.test.mjs`, `tests/opencode-providers.test.mjs`, `tests/model-select.test.mjs` y ampliacion de `tests/agent-model-config.test.mjs`).
+- `npm run build`: **PASS** (`tsc --noEmit` + Vite build).
+- Validacion real local: `/api/models` devuelve 543 modelos de 7 proveedores, 364 de `openrouter` y 0 deprecados; el desplegable del panel muestra los grupos `openrouter:364`; guardar `openrouter/openai/gpt-4.1-nano` escribe ese `model:` en los seis agentes; la prueba de conexion contra ese modelo responde `ok: true` en 9,3 s. La configuracion original (`ollama-cloud/beam`) quedo restaurada.
+- Limitacion: `groq` y `minimax-coding-plan` siguen conectados solo en la app Desktop; el panel los avisa con el comando `opencode auth login --provider <id>` para conectarlos en el CLI.
 
 ## Consumo de tokens por trabajo (2026-11-03)
 

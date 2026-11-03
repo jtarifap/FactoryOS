@@ -1,5 +1,6 @@
 ﻿import "./style.css";
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
+import { buildModelGroups, type ModelItem } from "./model-select";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
 import { addTokenUsage, emptyTokenUsage, formatTokenUsage, type TokenUsage } from "../shared/token-usage";
 
@@ -19,7 +20,7 @@ type Job = {
   logs: string[];
   lastError?: string;
 };
-type ModelItem = { id: string; name?: string; providerID?: string; status?: string };
+type ProviderStatus = { connected: string[]; visible: string[]; missing: string[] };
 type ProjectItem = { name: string; path: string; hasPackage: boolean; hasIndex: boolean };
 type Settings = {
   mode: "common" | "independent";
@@ -69,6 +70,7 @@ const els = {
   settingsBody: document.createElement("div"),
   settingsToggle: document.createElement("button"),
   settingsFeedback: document.createElement("p"),
+  providerHint: document.createElement("p"),
   jobList: document.createElement("div"),
   projectSelect: document.createElement("select"),
   previewStatus: document.createElement("p"),
@@ -115,28 +117,20 @@ function setTooltipForModel(select: HTMLSelectElement) {
 
 function fillModelSelect(select: HTMLSelectElement, selected: string) {
   select.innerHTML = "";
-  const grouped = new Map<string, ModelItem[]>();
-  for (const model of state.models) {
-    const key = model.providerID || "unknown";
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(model);
-  }
-  let found = false;
-  for (const [provider, items] of grouped) {
-    const group = document.createElement("optgroup");
-    group.label = provider;
-    for (const model of items) {
+  const groups = buildModelGroups(state.models, selected, state.settings?.modelStatus);
+  for (const group of groups) {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.provider;
+    for (const option of group.options) {
       const opt = document.createElement("option");
-      opt.value = model.id;
-      const suffix = state.settings?.modelStatus?.[model.id] === "no-results" ? " ⚠" :
-                    state.settings?.modelStatus?.[model.id] === "ok" ? " ✔" : "";
-      opt.textContent = `${model.name || model.id}${suffix}`;
-      if (model.id === selected) { opt.selected = true; found = true; }
-      group.appendChild(opt);
+      opt.value = option.value;
+      opt.textContent = option.label;
+      opt.selected = option.selected;
+      optgroup.appendChild(opt);
     }
-    select.appendChild(group);
+    select.appendChild(optgroup);
   }
-  if (found) select.value = selected;
+  if (selected) select.value = selected;
 }
 
 async function testModel(select: HTMLSelectElement, agent: AgentId, button: HTMLButtonElement) {
@@ -276,6 +270,11 @@ function buildSettingsUI(): HTMLElement {
   };
   els.settingsBody.appendChild(save);
   els.settingsBody.appendChild(els.settingsFeedback);
+
+  els.providerHint.id = "provider-hint";
+  els.providerHint.className = "hint";
+  els.providerHint.hidden = true;
+  els.settingsBody.appendChild(els.providerHint);
 
   modeSelect.onchange = () => {
     const commonMode = modeSelect.value === "common";
@@ -592,6 +591,27 @@ async function loadModels() {
   const data = await r.json();
   state.models = data.models || [];
   populateAllModelSelects();
+  await loadProviderStatus();
+}
+
+/** Shows which providers are connected in OpenCode but still invisible to FactoryOS. */
+async function loadProviderStatus() {
+  try {
+    const r = await fetch("/api/models/providers");
+    if (!r.ok) return;
+    const data = await r.json() as ProviderStatus;
+    const missing = data.missing || [];
+    if (!missing.length) {
+      els.providerHint.hidden = true;
+      els.providerHint.textContent = "";
+      return;
+    }
+    const commands = missing.map(provider => `opencode auth login --provider ${provider}`).join(" · ");
+    els.providerHint.textContent = `OpenCode tiene conectados estos proveedores y FactoryOS todavía no los ve: ${missing.join(", ")}. Conéctalos con: ${commands}`;
+    els.providerHint.hidden = false;
+  } catch {
+    els.providerHint.hidden = true;
+  }
 }
 
 async function loadJobs() {

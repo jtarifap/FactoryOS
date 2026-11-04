@@ -1,0 +1,20 @@
+# Blueprint de Render: publica FactoryOS como sitio estatico (CDN global, plan gratuito).
+#
+# El panel detecta en tiempo de ejecucion que no hay API local y entra en modo
+# demo con datos de ejemplo, asi que este unico build sirve tanto para la web
+# publica como para la instalacion local. No hace falta ninguna variable de
+# entorno para activar la demo.
+services:
+  - type: web
+    runtime: static
+    name: factoryos
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    autoDeployTrigger: commit
+    envVars:
+      # Render instala dependencias por su cuenta; lo delegamos al build command
+      # para que las versiones sean las exactas de package-lock.json.
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+      - key: NODE_VERSION
+        value: "22.12.0"

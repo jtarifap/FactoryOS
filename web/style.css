@@ -51,4 +51,8 @@
 .preview-link{display:inline-block;margin-top:6px;color:var(--accent);font-size:13px;text-decoration:underline}
 .preview-link:hover{color:var(--text)}
 
+/* Modo demo: aviso sobre la cabecera y acciones que necesitan la API local */
+.demo-banner{background:var(--surface);border-bottom:1px solid var(--border);border-left:3px solid var(--accent);color:var(--text);padding:12px 20px;font-size:13px;line-height:1.6}
+html[data-demo="on"] button:disabled{cursor:not-allowed;opacity:.45}
+
 @media (max-width:900px){.sidebar{width:168px;flex-basis:168px}.app-content{padding:20px 18px}.dash-card{flex-basis:140px}}

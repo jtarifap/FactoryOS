@@ -21,7 +21,8 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   class Element {
     children = []; style = {}; dataset = {}; listeners = {}; attributes = {}; ownText = "";
     value = ""; disabled = false;
-    constructor(tag) { this.tagName = tag; this.classList = new ClassList(this); elements.push(this); }
+    // The real DOM reports `tagName` in uppercase, so the mock does the same.
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.classList = new ClassList(this); elements.push(this); }
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
     append(...children) { children.forEach(child => this.appendChild(child)); }
     replaceChildren(...children) { this.children = []; this.ownText = ""; this.append(...children); }
@@ -29,7 +30,7 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
     removeAttribute(name) { delete this.attributes[name]; }
     set textContent(value) { this.ownText = String(value); this.children = []; }
     get textContent() { return this.ownText + this.children.map(child => child.textContent).join(""); }
-    get options() { return this.children.flatMap(child => child.tagName === "optgroup" ? child.children : [child]); }
+    get options() { return this.children.flatMap(child => child.tagName === "OPTGROUP" ? child.children : [child]); }
     addEventListener(event, fn) { this.listeners[event] = fn; }
     getBoundingClientRect() { return { left: 20, bottom: 80 }; }
   }
@@ -60,6 +61,7 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   let latestJobs = initialJobs;
   const fetch = async (url, options) => {
     calls.push({ url, options });
+    if (url === "/api/health") return { ok: true, json: async () => ({ ok: true, mode: "local" }) };
     if (url === "/api/settings" && options?.method === "PUT") {
       const next = JSON.parse(options.body);
       Object.assign(settings, next);
@@ -85,19 +87,16 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   const safeDomJs = ts.transpileModule(safeDomSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   const safeDomModule = { exports: {} };
   vm.runInNewContext(safeDomJs, { module: safeDomModule, exports: safeDomModule.exports });
+  // Every import is stripped and injected back as a global, so the panel runs
+  // against the real modules with a fake DOM and a fake HTTP boundary.
   const source = fs.readFileSync(new URL("../web/main.ts", import.meta.url), "utf8")
-    .replace('import "./style.css";', "")
-    .replace('import { renderJobSummary, renderModelTooltip } from "./safe-dom";', "")
-    .replace('import { buildModelGroups, type ModelItem } from "./model-select";', "")
-    .replace('import { buildDashboardRows, buildDashboardStats, type DashboardJob } from "./dashboard";', "")
-    .replace('import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from "./navigation";', "")
-    .replace('import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";', "")
-    .replace('import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage, type TokenUsage } from "../shared/token-usage";', "");
+    .replace(/import\s+[^;]*;/g, "");
   const themeModule = await import("../web/theme.ts");
   const tokenModule = await import("../shared/token-usage.ts");
   const modelSelectModule = await import("../web/model-select.ts");
   const dashboardModule = await import("../web/dashboard.ts");
   const navigationModule = await import("../web/navigation.ts");
+  const demoModule = await import("../web/demo.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const mainModule = { exports: {} };
   vm.runInNewContext(js, {
@@ -118,10 +117,16 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
     emptyTokenUsage: tokenModule.emptyTokenUsage,
     formatCost: tokenModule.formatCost,
     formatTokenUsage: tokenModule.formatTokenUsage,
+    DEMO_ACTION_TITLE: demoModule.DEMO_ACTION_TITLE,
+    DEMO_BANNER_TEXT: demoModule.DEMO_BANNER_TEXT,
+    createDemoBackend: demoModule.createDemoBackend,
+    forcedDemo: demoModule.forcedDemo,
+    probeApiHealth: demoModule.probeApiHealth,
+    resolveDemo: demoModule.resolveDemo,
     document, fetch,
     window: {
       innerWidth: 1000, scrollY: 0, localStorage: storage,
-      location: { hash: "" },
+      location: { hash: "", search: "" },
       history: { replaceState: () => {} },
       addEventListener: () => {},
     },
@@ -130,7 +135,7 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   });
   await new Promise(resolve => setImmediate(resolve));
   const select = document.getElementById("common-model");
-  const button = select.parentElement.children.find(el => el.tagName === "button");
+  const button = select.parentElement.children.find(el => el.tagName === "BUTTON");
   return { select, button, calls, settings, tooltip: document.getElementById("model-tooltip"), elements, document, storage };
 }
 
@@ -195,7 +200,7 @@ test("el CSS respeta hidden en la sección de modelo común", async () => {
 });
 
 const AGENT_KEYS = ["factory-manager", "developer", "qa-reviewer", "delivery-manager", "disenador", "auditoria-seguridad"];
-const saveButton = elements => elements.find(el => el.tagName === "button" && el.textContent === "Guardar configuración");
+const saveButton = elements => elements.find(el => el.tagName === "BUTTON" && el.textContent === "Guardar configuración");
 
 test("saving in common mode applies one model to all six agents", async () => {
   const { elements, settings, calls } = await mount({ ok: true }, "common");
@@ -232,7 +237,7 @@ test("new security agent selector tests its own selected model", async () => {
   const select = elements.find(el => el.id === "model-auditoria-seguridad");
   assert.ok(select, "Missing Auditoría model selector");
   select.value = "test/other";
-  const testButton = select.parentElement.children.find(el => el.tagName === "button");
+  const testButton = select.parentElement.children.find(el => el.tagName === "BUTTON");
   await testButton.onclick();
   const call = calls.find(entry => entry.url === "/api/models/test");
   assert.deepEqual(JSON.parse(call.options.body), { model: "test/other", agent: "auditoria-seguridad" });
@@ -244,11 +249,11 @@ test("consultation uses its own input and displays Factory-manager's answer in t
   assert.ok(kind, "Missing request type selector");
   kind.value = "question";
   kind.onchange();
-  const submit = elements.find(el => el.tagName === "button" && el.textContent === "Consultar");
+  const submit = elements.find(el => el.tagName === "BUTTON" && el.textContent === "Consultar");
   const form = elements.find(el => typeof el.onsubmit === "function");
   assert.ok(submit && form, "Consultation form is not ready");
-  const query = elements.find(el => el.tagName === "input" && el.placeholder === "Escribe aquí tu consulta");
-  const response = elements.find(el => el.tagName === "textarea");
+  const query = elements.find(el => el.tagName === "INPUT" && el.placeholder === "Escribe aquí tu consulta");
+  const response = elements.find(el => el.tagName === "TEXTAREA");
   query.value = "¿Cómo organizo este proyecto?";
   await form.onsubmit({ preventDefault() {} });
   const job = calls.find(call => call.url === "/api/jobs" && call.options?.method === "POST");
@@ -270,13 +275,13 @@ test("switching modes restores project fields and reveals the existing-project s
   const directory = elements.find(el => el.dataset.role === "existing-directory");
   const kind = elements.find(el => el.id === "request-kind");
   assert.ok(directory && kind, "Missing project routing controls");
-  const nameLabel = elements.find(el => el.tagName === "label" && el.textContent === "Nombre");
-  const requestLabel = elements.find(el => el.tagName === "label" && el.textContent === "Solicitud");
+  const nameLabel = elements.find(el => el.tagName === "LABEL" && el.textContent === "Nombre");
+  const requestLabel = elements.find(el => el.tagName === "LABEL" && el.textContent === "Solicitud");
   const name = elements.find(el => el.placeholder === "Nombre del proyecto");
-  const request = elements.find(el => el.tagName === "textarea");
+  const request = elements.find(el => el.tagName === "TEXTAREA");
   directory.value = "projects/sample";
   directory.onchange();
-  assert.equal(elements.find(el => el.tagName === "button" && el.textContent === "Modificar proyecto")?.textContent, "Modificar proyecto");
+  assert.equal(elements.find(el => el.tagName === "BUTTON" && el.textContent === "Modificar proyecto")?.textContent, "Modificar proyecto");
   kind.value = "question";
   kind.onchange();
   assert.equal(directory.value, "", "Consultations must not retain a project directory");
@@ -295,7 +300,7 @@ test("switching modes restores project fields and reveals the existing-project s
   assert.equal(requestLabel.textContent, "Solicitud");
   assert.equal(request.readOnly, false);
   assert.equal(directory.hidden, false);
-  assert.equal(elements.find(el => el.tagName === "button" && el.textContent === "Crear y ejecutar")?.textContent, "Crear y ejecutar");
+  assert.equal(elements.find(el => el.tagName === "BUTTON" && el.textContent === "Crear y ejecutar")?.textContent, "Crear y ejecutar");
 });
 
 test("theme toggle updates the root theme, saved preference and accessible icon", async () => {
@@ -316,7 +321,7 @@ test("theme toggle updates the root theme, saved preference and accessible icon"
 
 test("theme toggle sits immediately before the Local / Windows badge", async () => {
   const { elements } = await mount();
-  const header = elements.find(el => el.tagName === "header");
+  const header = elements.find(el => el.tagName === "HEADER");
   const statusGroup = elements.find(el => el.className === "header-status-group");
   const owner = elements.find(el => el.className === "header-owner");
   const toggle = elements.find(el => el.className === "secondary theme-toggle");
@@ -335,7 +340,7 @@ test("theme toggle sits immediately before the Local / Windows badge", async () 
 
 test("the panel shows the sidebar sections and only one view at a time", async () => {
   const { elements } = await mount();
-  const items = elements.filter(el => el.tagName === "a" && el.dataset.view);
+  const items = elements.filter(el => el.tagName === "A" && el.dataset.view);
   assert.deepEqual(items.map(el => el.ownText), ["Dashboard", "Nuevo proyecto", "Trabajos", "Vista previa", "Ajustes"]);
   assert.deepEqual(items.map(el => el.dataset.view), ["dashboard", "nuevo", "trabajos", "preview", "ajustes"]);
   assert.deepEqual(items.map(el => el.href), ["#/dashboard", "#/nuevo", "#/trabajos", "#/preview", "#/ajustes"]);

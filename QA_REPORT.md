@@ -1,5 +1,20 @@
 # QA Report - FactoryOS 2.0
 
+## Modo demo y publicacion estatica en Render (2026-11-04)
+
+- Sintoma: el despliegue en Render fallaba con `No open ports detected on 0.0.0.0` y `Port scan timeout reached`. Causa raiz: `server/index.ts` hacia `server.listen(4177, "127.0.0.1")`, es decir, puerto y host fijos; Render escanea `0.0.0.0` e inyecta su propia variable `PORT`.
+- Decision: la version publicada no es la API sino la interfaz. FactoryOS es una herramienta local (Windows, CLI de OpenCode, `projects/` y `data/` en disco), asi que el despliegue público es un **Static Site** con el panel en modo demo, no un Web Service.
+- Modo demo: el panel consulta `/api/health` al arrancar y, si la API no responde, entra en demo con datos de ejemplo. Con la API levantada sigue funcionando igual, sin variables de entorno ni dos versiones que mantener. Se puede forzar con `?demo=1` y `?demo=0`.
+- En demo se muestra una banda de aviso, el chip de la cabecera pasa a `Demo · datos de ejemplo` y las 20 acciones que escriben en la API quedan deshabilitadas con tooltip (`Disponible en la versión local de FactoryOS`).
+- Por que se detecto en tiempo de ejecucion y no con una variable de compilacion: un flag `VITE_DEMO` dependeria de que nadie lo exportase en local, y el fallo seria silencioso. Con la sonda, es imposible que Render y local se comporten distinto.
+- Alternativa descartada: publicar ficheros JSON estaticos en `public/api/` para simular la API. Es mas fragil (los POST fallarian, el Content-Type no seria JSON) y deja el panel a medias.
+- Verificacion en navegador (servidor estatico sobre `dist/`, equivalente a lo que sirve Render): banner visible, chip `Demo · datos de ejemplo`, dashboard con 4 trabajos de ejemplo (1 activo, 2 finalizados, 1 con error, 6,00 USD), 6 selectores de modelo con 2 opciones cada uno y 20 botones de escritura deshabilitados. La landing carga sin errores ni peticiones a la API.
+- Verificacion en local (Vite en 5173 con la API en 4177): sin banner, chip `Local / Windows`, 0 botones deshabilitados, 8 trabajos reales del pipeline y 546 modelos del catalogo de OpenCode en los selectores.
+- `render.yaml`: sitio estatico con `npm ci && npm run build` y `staticPublishPath: ./dist`, mas `SKIP_INSTALL_DEPS=true` (Render instala por su cuenta; se delega al build command para respetar `package-lock.json`) y `NODE_VERSION=22.12.0`. Sin rewrites: la landing se sirve en `/` y el panel en `/app.html`, con enrutado por hash.
+- `npm ci --dry-run` confirma que `package-lock.json` esta sincronizado con `package.json`; sin esto el build de Render fallaria en la instalacion de dependencias.
+- Correccion en el test `tests/common-model.test.mjs`: el DOM simulado devolvia `tagName` en minusculas y el test exigia `A`. Se alinea el mock con el DOM real (mayusculas) en lugar de relajar la asercion. Ademas, el fixture pasa a inyectar los imports por expresion regular, de modo que anadir un modulo al panel no rompe el montaje.
+- `npm test`: **199/199 PASS** (nuevos `tests/demo-mode.test.mjs` y `tests/demo-wiring.test.mjs`). `npm run build`: **PASS**.
+
 ## Capturas y carpeta de diseño (2026-11-04)
 
 - Las capturas que muestra el README viven ahora en `public/images/readme/` (6 ficheros, 1905x861, ~790 KB) y son las que se publican en GitHub. Se mantiene la tabla 3x2 con imagenes de 440 px de ancho.

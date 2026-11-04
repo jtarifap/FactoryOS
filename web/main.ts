@@ -6,6 +6,7 @@ import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
 import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage } from "../shared/token-usage";
 import {
+  DEMO_ACTION_TITLE,
   DEMO_BANNER_TEXT,
   createDemoBackend,
   forcedDemo,
@@ -51,7 +52,21 @@ function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return state.demo ? Promise.resolve(demoBackend(path, init)) : fetch(path, init);
 }
 
-/** Marks the panel as a demo: banner, chip label and a hint on every action. */
+/**
+ * Marks a button as dependent on the local API. In demo mode it is disabled
+ * and explains why, so the panel can be browsed but not written to.
+ */
+function requiresApi(button: HTMLButtonElement): HTMLButtonElement {
+  button.dataset.requiresApi = "true";
+  if (state.demo) {
+    button.disabled = true;
+    button.title = DEMO_ACTION_TITLE;
+    button.setAttribute("aria-disabled", "true");
+  }
+  return button;
+}
+
+/** Marks the panel as a demo: banner, chip label and disabled write actions. */
 function applyDemoMode() {
   document.documentElement.dataset.demo = "on";
   const chip = document.getElementById("status-chip");
@@ -64,6 +79,13 @@ function applyDemoMode() {
   const body = document.querySelector(".app-body");
   if (shell && body) shell.insertBefore(banner, body);
   else shell?.appendChild(banner);
+
+  // The actions that write to the local API cannot work without a server.
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("button[data-requires-api]"))) {
+    button.disabled = true;
+    button.title = DEMO_ACTION_TITLE;
+    button.setAttribute("aria-disabled", "true");
+  }
 }
 
 let consultationOutputField: HTMLTextAreaElement | null = null;
@@ -152,7 +174,7 @@ async function testModel(select: HTMLSelectElement, agent: AgentId, button: HTML
   button.textContent = "Probando...";
   try {
     const model = select.value;
-    const r = await fetch("/api/models/test", {
+    const r = await apiFetch("/api/models/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, agent }),
@@ -183,11 +205,11 @@ function buildSettingsUI(): HTMLElement {
     els.settingsToggle.textContent = visible ? "Ocultar" : "Mostrar";
   };
   toggleRow.appendChild(els.settingsToggle);
-  const validateBtn = create("button", "Validar configuración");
+  const validateBtn = requiresApi(create("button", "Validar configuración"));
   validateBtn.className = "secondary";
   validateBtn.onclick = async () => {
     els.settingsFeedback.textContent = "Validando...";
-    const r = await fetch("/api/settings/validate", { method: "POST" });
+    const r = await apiFetch("/api/settings/validate", { method: "POST" });
     const data = await r.json();
     els.settingsFeedback.textContent = data.ok ? "Configuración válida." : `Errores: ${data.errors?.join(" · ") || data.error || "desconocido"}`;
   };
@@ -211,7 +233,7 @@ function buildSettingsUI(): HTMLElement {
   setTooltipForModel(commonSelect);
   const commonRow = create("div");
   commonRow.className = "row";
-  const commonTest = create("button", "Probar");
+  const commonTest = requiresApi(create("button", "Probar"));
   commonTest.type = "button";
   commonTest.className = "secondary test-model";
   commonTest.onclick = () => testModel(commonSelect, "factory-manager", commonTest);
@@ -231,7 +253,7 @@ function buildSettingsUI(): HTMLElement {
     const select = document.createElement("select");
     select.id = `model-${agent.id}`;
     setTooltipForModel(select);
-    const test = create("button", "Probar");
+    const test = requiresApi(create("button", "Probar"));
     test.type = "button";
     test.className = "secondary test-model";
     test.onclick = () => testModel(select, agent.id, test);
@@ -254,7 +276,7 @@ function buildSettingsUI(): HTMLElement {
   autoWrap.appendChild(warning);
   els.settingsBody.appendChild(autoWrap);
 
-  const save = create("button", "Guardar configuración");
+  const save = requiresApi(create("button", "Guardar configuración"));
   save.onclick = async (ev) => {
     ev.preventDefault();
     els.settingsFeedback.textContent = "Guardando...";
@@ -272,7 +294,7 @@ function buildSettingsUI(): HTMLElement {
       autoApprove: autoCheck.checked,
       agentModels,
     };
-    const r = await fetch("/api/settings", {
+    const r = await apiFetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -326,7 +348,7 @@ function renderCreateJob(): HTMLElement {
   const directory = document.createElement("select");
   directory.dataset.role = "existing-directory";
   directory.innerHTML = `<option value="">Crear nuevo proyecto</option>`;
-  const submit = create("button", "Crear y ejecutar");
+  const submit = requiresApi(create("button", "Crear y ejecutar"));
   const feedback = create("p");
   feedback.className = "hint";
 
@@ -381,7 +403,7 @@ function renderCreateJob(): HTMLElement {
       requestKind: kind,
     };
     if (kind === "project" && directory.value) payload.directory = directory.value;
-    const r = await fetch("/api/jobs", {
+    const r = await apiFetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -422,10 +444,10 @@ function renderPreview(): HTMLElement {
   els.projectSelect.innerHTML = `<option value="">Selecciona proyecto...</option>`;
   row.appendChild(els.projectSelect);
 
-  const start = create("button", "Arrancar");
-  const stop = create("button", "Detener");
+  const start = requiresApi(create("button", "Arrancar"));
+  const stop = requiresApi(create("button", "Detener"));
   stop.className = "danger";
-  const zip = create("button", "Generar ZIP");
+  const zip = requiresApi(create("button", "Generar ZIP"));
   zip.className = "secondary";
   row.appendChild(start);
   row.appendChild(stop);
@@ -464,7 +486,7 @@ function renderPreview(): HTMLElement {
     }
     els.previewStatus.textContent = "Arrancando la app (puede tardar si hay que instalar dependencias)...";
     els.previewLink.hidden = true;
-    const r = await fetch("/api/preview/start", {
+    const r = await apiFetch("/api/preview/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ directory: dir, args: els.previewArgs.value }),
@@ -497,7 +519,7 @@ function renderPreview(): HTMLElement {
   stop.onclick = async () => {
     const dir = els.projectSelect.value;
     if (!dir) return;
-    await fetch("/api/preview/stop", {
+    await apiFetch("/api/preview/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ directory: dir }),
@@ -511,7 +533,7 @@ function renderPreview(): HTMLElement {
   zip.onclick = async () => {
     const dir = els.projectSelect.value;
     if (!dir) return;
-    const r = await fetch(`/api/projects/zip?directory=${encodeURIComponent(dir)}`);
+    const r = await apiFetch(`/api/projects/zip?directory=${encodeURIComponent(dir)}`);
     if (!r.ok) {
       let message = "No se pudo generar el ZIP";
       try {
@@ -577,6 +599,7 @@ function renderHeader(): HTMLElement {
 
   const badge = create("span", "Local / Windows");
   badge.className = "chip";
+  badge.id = "status-chip";
   const statusGroup = create("div");
   statusGroup.className = "header-status-group";
   const owner = create("a", "by taridev");
@@ -593,7 +616,7 @@ function renderHeader(): HTMLElement {
 }
 
 async function loadSettings(preserveSelection = true) {
-  const r = await fetch("/api/settings");
+  const r = await apiFetch("/api/settings");
   const data = await r.json();
   const preservedSelections = preserveSelection
     ? ["common-model", ...AGENTS.map(agent => `model-${agent.id}`)].map(id => ({
@@ -632,14 +655,14 @@ function populateAllModelSelects() {
 }
 
 async function loadModels() {
-  const r = await fetch("/api/models");
+  const r = await apiFetch("/api/models");
   const data = await r.json();
   state.models = data.models || [];
   populateAllModelSelects();
 }
 
 async function loadJobs() {
-  const r = await fetch("/api/jobs");
+  const r = await apiFetch("/api/jobs");
   const jobs = (await r.json()) as Job[];
   const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, j.tokens, (j.logs || []).length]));
   if (sig === state.lastJobsSignature) {
@@ -698,22 +721,22 @@ async function loadJobs() {
     const actions = create("div");
     actions.className = "actions";
     if (job.status === "queued" || job.status === "running") {
-      const cancel = create("button", "Cancelar");
+      const cancel = requiresApi(create("button", "Cancelar"));
       cancel.className = "danger";
-      cancel.onclick = async () => { await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" }); await loadJobs(); };
+      cancel.onclick = async () => { await apiFetch(`/api/jobs/${job.id}/cancel`, { method: "POST" }); await loadJobs(); };
       actions.appendChild(cancel);
     }
     if (["failed", "cancelled", "needs_intervention"].includes(job.status)) {
-      const retry = create("button", "Reintentar");
+      const retry = requiresApi(create("button", "Reintentar"));
       retry.className = "secondary";
-      retry.onclick = async () => { await fetch(`/api/jobs/${job.id}/retry`, { method: "POST" }); await loadJobs(); };
+      retry.onclick = async () => { await apiFetch(`/api/jobs/${job.id}/retry`, { method: "POST" }); await loadJobs(); };
       actions.appendChild(retry);
     }
     if (job.requestKind !== "question" && ["done", "validated", "needs_intervention"].includes(job.status)) {
-      const zip = create("button", "ZIP");
+      const zip = requiresApi(create("button", "ZIP"));
       zip.className = "secondary";
       zip.onclick = async () => {
-        const r = await fetch(`/api/projects/zip?directory=${encodeURIComponent(job.directory)}`);
+        const r = await apiFetch(`/api/projects/zip?directory=${encodeURIComponent(job.directory)}`);
         if (!r.ok) {
           let message = "No se pudo generar el ZIP";
           try {
@@ -736,11 +759,11 @@ async function loadJobs() {
       };
       actions.appendChild(zip);
     }
-    const del = create("button", "Borrar");
+    const del = requiresApi(create("button", "Borrar"));
     del.className = "danger";
     del.onclick = async () => {
       if (!confirm("Borrar este trabajo del listado?")) return;
-      await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
+      await apiFetch(`/api/jobs/${job.id}`, { method: "DELETE" });
       await loadJobs();
     };
     actions.appendChild(del);
@@ -765,7 +788,7 @@ async function loadJobs() {
 }
 
 async function loadProjects() {
-  const r = await fetch("/api/projects");
+  const r = await apiFetch("/api/projects");
   state.projects = await r.json();
   // Capture after the request: the user may change selection while it is pending.
   const selectedProject = els.projectSelect.value;
@@ -943,8 +966,23 @@ function buildApp() {
 }
 
 buildApp();
-loadSettings().catch(() => void 0);
-loadModels().catch(() => void 0);
-loadProjects().catch(() => void 0);
-loadJobs().catch(() => void 0);
-setInterval(() => { loadJobs().catch(() => void 0); loadProjects().catch(() => void 0); }, 3000);
+
+/**
+ * The published version is a static site without a local API, so the panel
+ * asks the API whether it is alive and switches to sample data when it is not.
+ * The mode is decided once, before any data is loaded, so the demo never mixes
+ * real and sample information.
+ */
+async function start() {
+  const forced = forcedDemo(window.location.search);
+  const healthy = forced === true ? false : await probeApiHealth(fetch);
+  state.demo = resolveDemo(forced, healthy);
+  if (state.demo) applyDemoMode();
+  loadSettings().catch(() => void 0);
+  loadModels().catch(() => void 0);
+  loadProjects().catch(() => void 0);
+  loadJobs().catch(() => void 0);
+  setInterval(() => { loadJobs().catch(() => void 0); loadProjects().catch(() => void 0); }, 3000);
+}
+
+start();

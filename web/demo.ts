@@ -15,6 +15,8 @@ export const DEMO_MUTATION_ERROR =
 export const DEMO_BANNER_TEXT =
   "Demo con datos de ejemplo. La ejecución de agentes, la vista previa y las descargas necesitan FactoryOS instalado en local.";
 
+export const DEMO_ACTION_TITLE = "Disponible en la versión local de FactoryOS";
+
 const usage = (input: number, output: number, cost: number): TokenUsage => ({
   input,
   output,
@@ -194,7 +196,7 @@ export function createDemoBackend(): DemoBackend {
  * Asks the local API whether it is alive. Any failure (404 from the static
  * host, a network error or a slow response) means demo mode.
  */
-export async function probeApiHealth(fetchImpl: typeof fetch, timeoutMs = 1200): Promise<boolean> {
+export async function probeApiHealth(fetchImpl: typeof fetch, timeoutMs = 2000): Promise<boolean> {
   const controller = new AbortController();
   const probe = (async () => {
     try {

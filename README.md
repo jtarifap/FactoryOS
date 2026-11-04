@@ -114,6 +114,27 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - Para que un proveedor añadido en la app Desktop aparezca en el panel, conectalo tambien en el CLI: `opencode auth login --provider <id>`.
 - Comprobacion: `opencode auth list` debe listar el proveedor y `opencode models` debe mostrar sus modelos.
 
+## Modo demo y publicacion estatica
+
+- El panel decide su modo al arrancar: consulta `/api/health` y, si la API local no responde, entra en **modo demo** con datos de ejemplo. Con la API levantada, funciona igual que siempre.
+- En modo demo el panel muestra una banda avisando de que los datos son de ejemplo, cambia el chip de la cabecera a `Demo · datos de ejemplo` y deshabilita las acciones que escriben en la API (crear, cancelar, reintentar, borrar, ZIP, vista previa, validar y guardar configuración), con un tooltip que indica que están disponibles en la versión local.
+- El mismo build sirve para local y para producción: no hay variables de entorno que activar ni dos versiones distintas que mantener.
+- Se puede forzar el modo desde la URL: `?demo=1` lo activa y `?demo=0` lo desactiva, sin tocar código.
+- `render.yaml` publica el proyecto como **Static Site** (CDN global, plan gratuito). La landing es estática y el panel funciona en demo porque no hay servidor.
+
+### Configuracion en Render
+
+| Campo | Valor |
+| --- | --- |
+| Tipo | Static Site |
+| Build Command | `npm ci && npm run build` |
+| Publish Directory | `dist` |
+| Environment | `SKIP_INSTALL_DEPS=true`, `NODE_VERSION=22.12.0` |
+
+No hacen falta rewrites: la landing se sirve en `/` y el panel en `/app.html`, y el panel enruta por hash (`#/dashboard`).
+
+El pipeline de agentes (OpenCode) no se ejecuta en Render: la version publicada es una demo de interfaz. Para la version funcional, FactoryOS se instala en local.
+
 ## Seguridad y persistencia
 
 - Jobs cancelados/no terminados -> `failed` al reiniciar, con lastError human-readable.
@@ -133,6 +154,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `server/preview-plan.ts`: elección de script, argumentos y detección del puerto de la app en la vista previa.
 - `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
+- `web/demo.ts`: detección del modo demo, datos de ejemplo y backend que sustituye a la API.
+- `render.yaml`: configuración de publicación como sitio estático en Render.
 - `tests/`: pruebas de API, ZIP, preview y landing.
 - `public/images/readme/`: capturas del panel que usa la rejilla de este README, todas a 1905×861 para que la tabla quede pareja; el clic abre la imagen a tamaño completo.
 - `projects/`: proyectos generados por la fábrica.
@@ -157,6 +180,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `npm test` ejecuta pruebas unitarias/regresión y handlers ZIP/preview con fixtures sintéticos; no llama a proveedores reales. En Windows, los tests de ZIP usan `tar.exe`.
 - Para usar el agente principal en OpenCode, selecciona `factory-manager` en la lista de agentes o ejecuta `opencode run --agent factory-manager "tu petición"` desde el proyecto.
 - `tests/landing.test.mjs` valida la landing: secciones, estilos y botones que abren `/app.html`.
+- `tests/demo-mode.test.mjs` y `tests/demo-wiring.test.mjs` validan la detección del modo demo, los datos de ejemplo y el cableado del panel.
 - `tests/navigation.test.mjs` y `tests/dashboard.test.mjs` validan el menú lateral y los datos del dashboard; `tests/preview-plan.test.mjs` y `tests/preview-kill.test.mjs` validan el arranque y la parada de la app en la vista previa.
 - `curl http://127.0.0.1:4177/api/health` comprueba la API mientras esta en ejecucion.
 - Crea un proyecto "hola mundo" desde FactoryOS y observa logs/QA report.

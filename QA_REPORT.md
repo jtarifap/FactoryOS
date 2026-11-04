@@ -1,12 +1,19 @@
 # QA Report - FactoryOS 2.0
 
+## Capturas y carpeta de diseño (2026-11-04)
+
+- Las capturas que muestra el README viven ahora en `public/images/readme/` (6 ficheros, 1905x861, ~790 KB) y son las que se publican en GitHub. Se mantiene la tabla 3x2 con imagenes de 440 px de ancho.
+- `web/design/` (maquetas, `support.js` y el runtime de React, 43 ficheros) se retira del repositorio con `git rm -r --cached`: desaparece de GitHub pero se conserva en el disco local, porque es material de referencia de diseño que no forma parte del producto.
+- `web/design/` se anade a `.gitignore` para que no vuelva a subirse por descuido. `web/design/capturas_design/readme/`, que solo existia para el README, se deja de usar: la fuente de verdad son las copias de `public/images/readme/`.
+- Verificacion: las 12 rutas del README (`src` y `href`) existen en el arbol; las 6 imagenes de `public/images/readme/` miden 1905x861 y pesan lo mismo que las normalizadas anteriores.
+
 ## README: capturas del panel (2026-11-04)
 
 - Se retiran las tres capturas antiguas (`public/images/captLanding.jpg`, `captApp1.jpg`, `captApp2.jpg`), que mostraban el panel sin menu lateral y ya solo se referenciaban desde el README. Los ficheros se eliminaron por quedar huerfanos (262 KB).
-- Se incorporan las seis capturas actuales de `web/design/capturas_design/`: Dashboard, Nuevo proyecto, Trabajos, Vista previa, Ajustes y Dashboard con error. Cada una enlaza a su version completa y lleva su pie de foto.
+- Se incorporan las seis capturas actuales del panel (Dashboard, Nuevo proyecto, Trabajos, Vista previa, Ajustes y Dashboard con error). Cada una enlaza a su version completa y lleva su pie de foto.
 - Las rutas se verifican contra el arbol del repositorio: las seis existen.
 - Rejilla 3x2 en una tabla HTML (antes era un parrafo centrado que se partia segun el ancho): cada fila tiene dos capturas con su pie. Se sube el ancho de 420 a 440 px, el maximo que deja GitHub para dos columnas sin barra de desplazamiento (contenido de 948 px menos el relleno de las celdas).
-- Las capturas originales tienen proporciones distintas (2,20 a 3,12), asi que a igual ancho sus alturas variaban hasta 59 px y los pies de foto no quedaban alineados. Se generan copias en `web/design/capturas_design/readme/` sobre un lienzo comun de 1905x861 relleno con el color de fondo del panel (#0c0d0f): las seis miden lo mismo, sin recortar ni deformar. El enlace de cada captura sigue abriendo el original a tamano completo.
+- Las capturas originales tienen proporciones distintas (2,20 a 3,12), asi que a igual ancho sus alturas variaban hasta 59 px y los pies de foto no quedaban alineados. Se generan copias normalizadas sobre un lienzo comun de 1905x861 relleno con el color de fondo del panel (#0c0d0f): las seis miden lo mismo, sin recortar ni deformar.
 - Comprobado en navegador con las reglas de tabla de GitHub: las seis imagenes rinden **410x185 px identicas**, la tabla ocupa 873 px sobre un cuerpo de 937 px y no hay desbordamiento ni imagenes rotas. En GitHub, a 948 px utiles, quedan en 440x199 px.
 - Texto actualizado con los cambios de las dos ultimas entregas: menu lateral y Dashboard (secciones, hash de la vista, cabecera con `taridev`), vista previa (eleccion de script, `npm install` previo, deteccion del puerto real, argumentos extra, logs en error y URL absoluta para el caso estatico) y el proxy `/preview-static` de Vite. Tambien se corrige la linea que afirmaba que el panel avisaba de los proveedores sin conectar en Ajustes, porque ese aviso se elimino.
 - `npm test`: **182/182 PASS**. `npm run build`: **PASS**.
@@ -26,7 +33,7 @@
 
 ## Menu lateral y Dashboard (2026-11-03)
 
-- Referencia de diseño: `web/design/2. Dashboard` (maqueta y PNG exportados). Se replican sus valores (sidebar de 220 px, items con `padding:10px 12px`, activo en `#ff9f1c` con barra izquierda de 2 px, contenido con `padding:28px 32px`) sobre las variables de tema ya existentes, por lo que el tema claro funciona sin duplicar colores.
+- Referencia de diseño local (no versionada): `web/design/2. Dashboard` (maqueta y PNG exportados). Se replican sus valores (sidebar de 220 px, items con `padding:10px 12px`, activo en `#ff9f1c` con barra izquierda de 2 px, contenido con `padding:28px 32px`) sobre las variables de tema ya existentes, por lo que el tema claro funciona sin duplicar colores.
 - Estructura: cabecera de 52 px a ancho completo (logo, `taridev`, toggle de tema y chip `Local / Windows` a la derecha) y cuerpo con menú lateral fijo + zona de contenido. Se retira el `max-width:1100px` del panel anterior, que quedaba corto con el menú.
 - Menú: Dashboard · Nuevo proyecto · Trabajos · Vista previa · Ajustes. La vista activa se marca en el menú y se guarda en el hash (`#/dashboard`), de modo que sobrevive a una recarga y se puede enlazar.
 - Dashboard con datos reales de `/api/jobs`: tarjetas Activos (queued+running), Finalizados (done+validated), Con error (failed+needs_intervention) y Coste IA del mes (suma de `tokens.cost` de los trabajos actualizados este mes). La tabla lista Trabajo, Estado, Fase, Coste IA y Actualizado.

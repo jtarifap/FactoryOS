@@ -7,3 +7,6 @@ projects/
 
 backups/
 
+# Maquetas y capturas de diseño: material local de referencia, no se versiona.
+web/design/
+

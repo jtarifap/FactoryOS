@@ -4,31 +4,31 @@ Fábrica autónoma de software con multiagentes IA para planificar, desarrollar,
 <table>
   <tr>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/Dashboard.jpg"><img src="web/design/capturas_design/readme/Dashboard.jpg" alt="Dashboard con el resumen de los trabajos" width="440"></a><br>
+      <a href="public/images/readme/Dashboard.jpg"><img src="public/images/readme/Dashboard.jpg" alt="Dashboard con el resumen de los trabajos" width="440"></a><br>
       <sub><b>Dashboard</b> · resumen de los trabajos</sub>
     </td>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/Proyecto.jpg"><img src="web/design/capturas_design/readme/Proyecto.jpg" alt="Formulario de nuevo proyecto" width="440"></a><br>
+      <a href="public/images/readme/Proyecto.jpg"><img src="public/images/readme/Proyecto.jpg" alt="Formulario de nuevo proyecto" width="440"></a><br>
       <sub><b>Nuevo proyecto</b> · descripción y modelo</sub>
     </td>
   </tr>
   <tr>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/Trabajos.jpg"><img src="web/design/capturas_design/readme/Trabajos.jpg" alt="Detalle de un trabajo con su consumo de tokens y su registro" width="440"></a><br>
+      <a href="public/images/readme/Trabajos.jpg"><img src="public/images/readme/Trabajos.jpg" alt="Detalle de un trabajo con su consumo de tokens y su registro" width="440"></a><br>
       <sub><b>Trabajos</b> · tokens y registro</sub>
     </td>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/VistaPrevia.jpg"><img src="web/design/capturas_design/readme/VistaPrevia.jpg" alt="Vista previa con la app generada en marcha" width="440"></a><br>
+      <a href="public/images/readme/VistaPrevia.jpg"><img src="public/images/readme/VistaPrevia.jpg" alt="Vista previa con la app generada en marcha" width="440"></a><br>
       <sub><b>Vista previa</b> · app en marcha</sub>
     </td>
   </tr>
   <tr>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/Ajustes.jpg"><img src="web/design/capturas_design/readme/Ajustes.jpg" alt="Ajustes con el modelo por agente" width="440"></a><br>
+      <a href="public/images/readme/Ajustes.jpg"><img src="public/images/readme/Ajustes.jpg" alt="Ajustes con el modelo por agente" width="440"></a><br>
       <sub><b>Ajustes</b> · modelo por agente</sub>
     </td>
     <td align="center" valign="top" width="50%">
-      <a href="web/design/capturas_design/Dashboard_Error.jpg"><img src="web/design/capturas_design/readme/Dashboard_Error.jpg" alt="Dashboard con un trabajo en error" width="440"></a><br>
+      <a href="public/images/readme/Dashboard_Error.jpg"><img src="public/images/readme/Dashboard_Error.jpg" alt="Dashboard con un trabajo en error" width="440"></a><br>
       <sub><b>Dashboard con error</b> · intervención necesaria</sub>
     </td>
   </tr>
@@ -134,8 +134,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
 - `tests/`: pruebas de API, ZIP, preview y landing.
-- `web/design/capturas_design/`: capturas originales del panel a tamaño completo.
-- `web/design/capturas_design/readme/`: copias normalizadas a 1905×861 (mismo tamaño, relleno del color de fondo) que usa la rejilla de este README; el enlace de cada captura abre el original.
+- `public/images/readme/`: capturas del panel que usa la rejilla de este README, todas a 1905×861 para que la tabla quede pareja; el clic abre la imagen a tamaño completo.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.
 - `QA_REPORT.md` se genera con evidencias reales (build/test).

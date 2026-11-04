@@ -1,5 +1,13 @@
 # QA Report - FactoryOS 2.0
 
+## README: capturas del panel (2026-11-04)
+
+- Se retiran las tres capturas antiguas (`public/images/captLanding.jpg`, `captApp1.jpg`, `captApp2.jpg`), que mostraban el panel sin menu lateral y ya solo se referenciaban desde el README. Los ficheros se eliminaron por quedar huerfanos (262 KB).
+- Se incorporan las seis capturas actuales de `web/design/capturas_design/`: Dashboard, Nuevo proyecto, Trabajos, Vista previa, Ajustes y Dashboard con error. Cada una enlaza a su version completa y lleva su pie de foto.
+- Las rutas se verifican contra el arbol del repositorio: las seis existen.
+- Texto actualizado con los cambios de las dos ultimas entregas: menu lateral y Dashboard (secciones, hash de la vista, cabecera con `taridev`), vista previa (eleccion de script, `npm install` previo, deteccion del puerto real, argumentos extra, logs en error y URL absoluta para el caso estatico) y el proxy `/preview-static` de Vite. Tambien se corrige la linea que afirmaba que el panel avisaba de los proveedores sin conectar en Ajustes, porque ese aviso se elimino.
+- `npm test`: **182/182 PASS**. `npm run build`: **PASS**.
+
 ## Vista previa: la app no se ve en el frame (2026-11-03)
 
 - Sintoma: al seleccionar un proyecto y pulsar **Arrancar**, el frame mostraba la web de FactoryOS en lugar de la app del proyecto.

@@ -2,9 +2,14 @@
 Fábrica autónoma de software con multiagentes IA para planificar, desarrollar, probar, corregir y entregar aplicaciones automáticamente.
 
 <p align="center">
-  <a href="public/images/captLanding.jpg"><img src="public/images/captLanding.jpg" alt="Landing de FactoryOS" width="250"></a>
-  <a href="public/images/captApp1.jpg"><img src="public/images/captApp1.jpg" alt="Panel de FactoryOS en modo Modelo común" width="250"></a>
-  <a href="public/images/captApp2.jpg"><img src="public/images/captApp2.jpg" alt="Panel de FactoryOS con modelos por agente" width="250"></a>
+  <a href="web/design/capturas_design/Dashboard.jpg"><img src="web/design/capturas_design/Dashboard.jpg" alt="Dashboard con el resumen de los trabajos" width="420"><br><sub>Dashboard</sub></a>
+  <a href="web/design/capturas_design/Proyecto.jpg"><img src="web/design/capturas_design/Proyecto.jpg" alt="Formulario de nuevo proyecto" width="420"><br><sub>Nuevo proyecto</sub></a>
+  <br>
+  <a href="web/design/capturas_design/Trabajos.jpg"><img src="web/design/capturas_design/Trabajos.jpg" alt="Detalle de un trabajo con su consumo de tokens y su registro" width="420"><br><sub>Trabajos</sub></a>
+  <a href="web/design/capturas_design/VistaPrevia.jpg"><img src="web/design/capturas_design/VistaPrevia.jpg" alt="Vista previa con la app generada en marcha" width="420"><br><sub>Vista previa</sub></a>
+  <br>
+  <a href="web/design/capturas_design/Ajustes.jpg"><img src="web/design/capturas_design/Ajustes.jpg" alt="Ajustes con el modelo por agente" width="420"><br><sub>Ajustes</sub></a>
+  <a href="web/design/capturas_design/Dashboard_Error.jpg"><img src="web/design/capturas_design/Dashboard_Error.jpg" alt="Dashboard con un trabajo en error" width="420"><br><sub>Dashboard con error</sub></a>
 </p>
 
 Repositorio: <https://github.com/jtarifap/FactoryOS>
@@ -29,9 +34,10 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/app.html` + `web/main.ts`: panel de FactoryOS en `/app.html`.
 - Menú lateral fijo de 220 px con las cinco secciones: **Dashboard**, **Nuevo proyecto**, **Trabajos**, **Vista previa** y **Ajustes**. La vista activa se marca en ámbar con barra izquierda y se refleja en el hash (`#/dashboard`), de modo que una recarga conserva la sección y se puede enlazar directamente.
 - El **Dashboard** resume los trabajos con datos reales de `/api/jobs`: cuatro tarjetas (Activos, Finalizados, Con error y Coste IA del mes) y una tabla con Trabajo, Estado, Fase, Coste IA y Actualizado. El progreso se muestra con la fase real del trabajo porque OpenCode no expone un porcentaje.
+- La cabecera muestra el logo a la izquierda y a la derecha `taridev`, el botón de tema y el chip `Local / Windows`.
 - Los botones **Empezar** y **Crear mi primer proyecto** de la landing abren el panel; el logo del panel vuelve a la landing.
 - Tema claro/oscuro: botón sol/luna junto a **LOCAL / WINDOWS** en el panel y después de **GitHub** en la landing, con persistencia en `localStorage` y oscuro por defecto.
-- `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`.
+- `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`. En desarrollo reenvía a la API tanto `/api` como `/preview-static`.
 
 ## Funcionamiento
 
@@ -51,8 +57,10 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - La configuración anterior había quedado en un solo modelo común; al recuperar el modo independiente, los seis agentes parten de ese modelo y se pueden personalizar por separado.
 - La prueba del modelo usa el agente integrado `build` con una instrucción de responder solo OK, sin herramientas: no ejecuta los planes de los agentes de fábrica. El resultado se registra en el historial y estado del modelo.
 - `autoApprove` (casilla): si esta marcada, los agentes ejecutan herramientas sin pedir permiso; desmarcada, OpenCode las rechaza y se informa en el log.
-- Vista previa desde FactoryOS: arranca apps Node (puerto web asignado) o sirve estaticos desde `projects/`.
-- El refresco automático conserva el proyecto seleccionado en **Vista previa y ZIP** y en el selector de modificación, mientras el proyecto siga existiendo.
+- Vista previa desde FactoryOS: **Arrancar** levanta la app del proyecto seleccionado. El script se elige del `package.json` por orden de preferencia (`dev`, `start`, `preview`, `serve`, `watch`) y, si faltan las dependencias, se ejecuta `npm install` antes.
+- El puerto real de la app se deduce de su salida, porque no todas respetan `PORT` (`vite` solo acepta `--port`), y la URL definitiva se comprueba antes de mostrarla. El campo **Argumentos extra** añade flags al script (`--host 0.0.0.0 --port 4000`).
+- Si la app no arranca, la vista previa muestra el error y los logs del proceso en lugar de un frame vacío, y el enlace **Abrir la app en una pestaña nueva** permite verla fuera del panel. Los proyectos estáticos (sin `package.json` pero con `index.html`) se sirven desde la API con una URL absoluta, de modo que el iframe muestra siempre la app y no la landing de FactoryOS.
+- El refresco automático conserva el proyecto seleccionado en **Vista previa** y en el selector de modificación, mientras el proyecto siga existiendo.
 - Los modelos se obtienen de `opencode models --verbose` y se prueban con `opencode run ... "Responde OK"` (timeout ~90s, con deteccion de cuota, credenciales, rate limit, timeout y retries abortadas cuando aparece un error real).
 - Logs limitados y cancelación desde el panel. Las fases de proyecto tienen un timeout de 20 min; las consultas directas a Factory-manager, de 2 min.
 - Cada trabajo muestra su consumo de tokens (entrada, salida, razonamiento y caché) y el coste estimado. El total incluye al Factory-manager y a los subagentes que hayan intervenido, y el panel muestra además el consumo global registrado.
@@ -60,7 +68,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas) y las bases de tokens en `data/opencode/`. Al reiniciar, jobs en ejecucion -> `failed` + lastError.
 - Proyectos generados en `projects/<slug>-<id>/` con README, código, tests, dist, QA_REPORT, ENTREGA y DELIVERY_REPORT.
 - Modificacion de proyectos existentes: endpoint `/api/jobs` acepta `directory` existente + checkpoint automático en `projects/<slug>-<id>-checkpoint`.
-- Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado y symlinks fuera del proyecto.
+- Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado y symlinks fuera del proyecto. Al detener, mata el árbol de procesos completo (`taskkill /T /F`) esperando a que termine, para que la app no quede huérfana escuchando en su puerto.
 - ZIP: excluye `.git`, `node_modules`, `.cache` y logs. Antes de crear el archivo inspecciona nombres y fingerprints de alta confianza; si encuentra credenciales/llaves o no puede completar el escaneo, bloquea la descarga sin devolver valores secretos. Empaqueta un snapshot de los bytes inspeccionados. Límites: 20 000 entradas, 1 MiB por archivo y 50 MiB inspeccionados.
 - El escaneo conservador puede bloquear proyectos con archivos legítimos grandes; no garantiza detectar todo formato de secreto. No empaquetes proyectos con credenciales.
 
@@ -81,7 +89,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 
 - El panel lista los modelos que ve el CLI de OpenCode (`opencode models --verbose`), agrupados por proveedor. Los agregadores como OpenRouter exponen ids con varios segmentos (`openrouter/openai/gpt-4.1`, `openrouter/~anthropic/claude-opus-latest`, `openrouter/thinkingmachines/inkling:free`): el panel los reconoce, los deja seleccionar y los escribe tal cual en el `model:` de cada agente.
 - Las credenciales las guarda OpenCode, no FactoryOS. La app Desktop las escribe en su propia base SQLite y el CLI en `~/.local/share/opencode/auth.json`; FactoryOS no lee ni copia ningun valor de clave.
-- Para que un proveedor añadido en la app Desktop aparezca en el panel, conectalo tambien en el CLI: `opencode auth login --provider <id>`. El panel avisa en Ajustes de los proveedores que siguen sin verse y del comando exacto para conectarlos.
+- Para que un proveedor añadido en la app Desktop aparezca en el panel, conectalo tambien en el CLI: `opencode auth login --provider <id>`.
 - Comprobacion: `opencode auth list` debe listar el proveedor y `opencode models` debe mostrar sus modelos.
 
 ## Seguridad y persistencia
@@ -100,13 +108,11 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `shared/`: cálculo y formato de tokens compartido entre servidor y panel.
 - `server/model-list.ts`: parser del catalogo de modelos de OpenCode (ids multi-segmento de proveedores agregadores).
 - `server/opencode-providers.ts`: proveedores conectados en OpenCode (solo identificadores, nunca valores de credencial).
-- Vista previa: el botón **Arrancar** levanta la app del proyecto seleccionado. El script se elige del `package.json` por orden de preferencia (`dev`, `start`, `preview`, `serve`, `watch`); si faltan las dependencias se ejecuta `npm install` antes. El puerto real de la app se deduce de su salida (no todas respetan `PORT`) y la URL definitiva se comprueba antes de mostrarla. El campo **Argumentos extra** añade flags al script (`--host 0.0.0.0 --port 4000`).
-- Si la app no arranca, la vista previa muestra el error y los logs del proceso en lugar de un frame vacío; el enlace **Abrir la app en una pestaña nueva** permite verla fuera del panel.
-- La vista previa estática (proyectos sin `package.json` con `index.html`) se sirve desde la API con una URL absoluta, de modo que el iframe muestra siempre la app y no la landing de FactoryOS.
+- `server/preview-plan.ts`: elección de script, argumentos y detección del puerto de la app en la vista previa.
 - `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
-- `server/preview-plan.ts`: elección de script, argumentos y detección del puerto de la app en la vista previa.
 - `tests/`: pruebas de API, ZIP, preview y landing.
+- `web/design/capturas_design/`: capturas del panel que ilustran este README.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.
 - `QA_REPORT.md` se genera con evidencias reales (build/test).
@@ -129,5 +135,6 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `npm test` ejecuta pruebas unitarias/regresión y handlers ZIP/preview con fixtures sintéticos; no llama a proveedores reales. En Windows, los tests de ZIP usan `tar.exe`.
 - Para usar el agente principal en OpenCode, selecciona `factory-manager` en la lista de agentes o ejecuta `opencode run --agent factory-manager "tu petición"` desde el proyecto.
 - `tests/landing.test.mjs` valida la landing: secciones, estilos y botones que abren `/app.html`.
+- `tests/navigation.test.mjs` y `tests/dashboard.test.mjs` validan el menú lateral y los datos del dashboard; `tests/preview-plan.test.mjs` y `tests/preview-kill.test.mjs` validan el arranque y la parada de la app en la vista previa.
 - `curl http://127.0.0.1:4177/api/health` comprueba la API mientras esta en ejecucion.
 - Crea un proyecto "hola mundo" desde FactoryOS y observa logs/QA report.

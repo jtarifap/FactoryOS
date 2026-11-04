@@ -1,6 +1,6 @@
 ---
 description: Desarrolla el proyecto siguiendo el plan del Factory-manager y el diseño si existe, en el stack indicado en plan.json.
-model: ollama-cloud/beam
+model: opencode/deepseek-v4.1-flash-free
 mode: subagent
 temperature: 0.2
 tools:

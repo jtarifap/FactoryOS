@@ -1,6 +1,6 @@
 ---
 description: Orquestador de la factoría. Clasifica el proyecto por complejidad, decide si hay interfaz, define el stack y elige qué agentes intervienen.
-model: ollama-cloud/beam
+model: opencode/deepseek-v4.1-flash-free
 mode: primary
 temperature: 0.1
 tools:

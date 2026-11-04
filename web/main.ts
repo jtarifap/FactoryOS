@@ -4,33 +4,15 @@ import { buildModelGroups, type ModelItem } from "./model-select";
 import { buildDashboardRows, buildDashboardStats, type DashboardJob } from "./dashboard";
 import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from "./navigation";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
-import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage, type TokenUsage } from "../shared/token-usage";
-
-type AgentId = "factory-manager" | "developer" | "qa-reviewer" | "delivery-manager" | "disenador" | "auditoria-seguridad";
-type Job = {
-  id: string;
-  name: string;
-  request: string;
-  requestKind?: "project" | "question";
-  answer?: string;
-  tokens?: TokenUsage;
-  status: string;
-  phase: string;
-  createdAt: string;
-  updatedAt: string;
-  directory: string;
-  logs: string[];
-  lastError?: string;
-};
-type ProjectItem = { name: string; path: string; hasPackage: boolean; hasIndex: boolean };
-type Settings = {
-  mode: "common" | "independent";
-  commonModel: string;
-  agentModels: Record<AgentId, string>;
-  autoApprove: boolean;
-  modelStatus?: Record<string, string>;
-  agentModelConfigVersion?: 2;
-};
+import { addTokenUsage, emptyTokenUsage, formatCost, formatTokenUsage } from "../shared/token-usage";
+import {
+  DEMO_BANNER_TEXT,
+  createDemoBackend,
+  forcedDemo,
+  probeApiHealth,
+  resolveDemo,
+} from "./demo";
+import type { AgentId, Job, ProjectItem, Settings } from "./api-types";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 let activeTheme: Theme;
@@ -56,7 +38,33 @@ const state = {
   activeConsultationId: "",
   consultationSelectionInitialized: false,
   activeView: DEFAULT_VIEW as ViewId,
+  demo: false,
 };
+
+const demoBackend = createDemoBackend();
+
+/**
+ * Single entry point for the API. In demo mode the static site has no server,
+ * so the request is answered with sample data instead of failing.
+ */
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return state.demo ? Promise.resolve(demoBackend(path, init)) : fetch(path, init);
+}
+
+/** Marks the panel as a demo: banner, chip label and a hint on every action. */
+function applyDemoMode() {
+  document.documentElement.dataset.demo = "on";
+  const chip = document.getElementById("status-chip");
+  if (chip) chip.textContent = "Demo · datos de ejemplo";
+
+  const banner = create("div", DEMO_BANNER_TEXT);
+  banner.className = "demo-banner";
+  banner.setAttribute("role", "status");
+  const shell = document.querySelector(".app-shell");
+  const body = document.querySelector(".app-body");
+  if (shell && body) shell.insertBefore(banner, body);
+  else shell?.appendChild(banner);
+}
 
 let consultationOutputField: HTMLTextAreaElement | null = null;
 const AGENTS: Array<{ id: AgentId; label: string }> = [
@@ -571,8 +579,11 @@ function renderHeader(): HTMLElement {
   badge.className = "chip";
   const statusGroup = create("div");
   statusGroup.className = "header-status-group";
-  const owner = create("span", "taridev");
+  const owner = create("a", "by taridev");
   owner.className = "header-owner";
+  owner.href = "https://taridev.com";
+  owner.target = "_blank";
+  owner.rel = "noopener noreferrer";
   statusGroup.appendChild(owner);
   statusGroup.appendChild(themeToggle);
   statusGroup.appendChild(badge);

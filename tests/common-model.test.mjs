@@ -323,8 +323,12 @@ test("theme toggle sits immediately before the Local / Windows badge", async () 
   const badge = elements.find(el => el.className === "chip");
 
   assert.ok(statusGroup, "Missing header status group");
-  assert.ok(owner, "Missing taridev label in the header");
-  assert.equal(owner.ownText, "taridev");
+  assert.ok(owner, "Missing 'by taridev' label in the header");
+  assert.equal(owner.ownText, "by taridev");
+  assert.equal(owner.tagName, "A");
+  assert.equal(owner.href, "https://taridev.com");
+  assert.equal(owner.target, "_blank");
+  assert.equal(owner.rel, "noopener noreferrer");
   assert.equal(header.children[1], statusGroup);
   assert.deepEqual(statusGroup.children, [owner, toggle, badge]);
 });

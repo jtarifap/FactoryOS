@@ -56,7 +56,7 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/app.html` + `web/main.ts`: panel de FactoryOS en `/app.html`.
 - Menú lateral fijo de 220 px con las cinco secciones: **Dashboard**, **Nuevo proyecto**, **Trabajos**, **Vista previa** y **Ajustes**. La vista activa se marca en ámbar con barra izquierda y se refleja en el hash (`#/dashboard`), de modo que una recarga conserva la sección y se puede enlazar directamente.
 - El **Dashboard** resume los trabajos con datos reales de `/api/jobs`: cuatro tarjetas (Activos, Finalizados, Con error y Coste IA del mes) y una tabla con Trabajo, Estado, Fase, Coste IA y Actualizado. El progreso se muestra con la fase real del trabajo porque OpenCode no expone un porcentaje.
-- La cabecera muestra el logo a la izquierda y a la derecha `taridev`, el botón de tema y el chip `Local / Windows`.
+- La cabecera muestra el logo a la izquierda y a la derecha `by taridev` (enlace a <https://taridev.com>, abre en pestaña nueva), el botón de tema y el chip `Local / Windows`.
 - Los botones **Empezar** y **Crear mi primer proyecto** de la landing abren el panel; el logo del panel vuelve a la landing.
 - Tema claro/oscuro: botón sol/luna junto a **LOCAL / WINDOWS** en el panel y después de **GitHub** en la landing, con persistencia en `localStorage` y oscuro por defecto.
 - `vite.config.ts` declara ambas páginas como entradas: `npm run build` genera `dist/index.html` y `dist/app.html`. En desarrollo reenvía a la API tanto `/api` como `/preview-static`.

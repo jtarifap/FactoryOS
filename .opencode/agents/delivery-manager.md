@@ -1,6 +1,6 @@
 ---
 description: Empaqueta y entrega el proyecto final con documentación, adaptando el nivel de detalle a la complejidad.
-model: ollama-cloud/beam
+model: opencode/deepseek-v4.1-flash-free
 mode: subagent
 temperature: 0.1
 tools:

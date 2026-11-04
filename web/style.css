@@ -11,7 +11,7 @@
 /* Estructura del panel: cabecera, menu lateral y vistas */
 .app-shell{display:flex;flex-direction:column;min-height:100vh}
 .app-shell>header{margin:0;padding:0 20px;height:52px;flex-wrap:nowrap;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:5}
-.header-owner{color:var(--muted);font-size:13px}
+.header-owner{color:var(--muted);font-size:13px;text-decoration:none}.header-owner:hover{text-decoration:underline}
 .app-body{display:flex;flex:1;min-height:0;align-items:stretch}
 .sidebar{width:220px;flex:0 0 220px;box-sizing:border-box;padding:20px 0;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:4px;position:sticky;top:52px;align-self:flex-start;height:calc(100vh - 52px);overflow-y:auto}
 .sidebar-item{display:block;padding:10px 12px;color:var(--muted);text-decoration:none;border-left:2px solid transparent;font-size:14px;line-height:1.2}

@@ -1,16 +1,38 @@
 # FactoryOS
 Fábrica autónoma de software con multiagentes IA para planificar, desarrollar, probar, corregir y entregar aplicaciones automáticamente.
 
-<p align="center">
-  <a href="web/design/capturas_design/Dashboard.jpg"><img src="web/design/capturas_design/Dashboard.jpg" alt="Dashboard con el resumen de los trabajos" width="420"><br><sub>Dashboard</sub></a>
-  <a href="web/design/capturas_design/Proyecto.jpg"><img src="web/design/capturas_design/Proyecto.jpg" alt="Formulario de nuevo proyecto" width="420"><br><sub>Nuevo proyecto</sub></a>
-  <br>
-  <a href="web/design/capturas_design/Trabajos.jpg"><img src="web/design/capturas_design/Trabajos.jpg" alt="Detalle de un trabajo con su consumo de tokens y su registro" width="420"><br><sub>Trabajos</sub></a>
-  <a href="web/design/capturas_design/VistaPrevia.jpg"><img src="web/design/capturas_design/VistaPrevia.jpg" alt="Vista previa con la app generada en marcha" width="420"><br><sub>Vista previa</sub></a>
-  <br>
-  <a href="web/design/capturas_design/Ajustes.jpg"><img src="web/design/capturas_design/Ajustes.jpg" alt="Ajustes con el modelo por agente" width="420"><br><sub>Ajustes</sub></a>
-  <a href="web/design/capturas_design/Dashboard_Error.jpg"><img src="web/design/capturas_design/Dashboard_Error.jpg" alt="Dashboard con un trabajo en error" width="420"><br><sub>Dashboard con error</sub></a>
-</p>
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/Dashboard.jpg"><img src="web/design/capturas_design/readme/Dashboard.jpg" alt="Dashboard con el resumen de los trabajos" width="440"></a><br>
+      <sub><b>Dashboard</b> · resumen de los trabajos</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/Proyecto.jpg"><img src="web/design/capturas_design/readme/Proyecto.jpg" alt="Formulario de nuevo proyecto" width="440"></a><br>
+      <sub><b>Nuevo proyecto</b> · descripción y modelo</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/Trabajos.jpg"><img src="web/design/capturas_design/readme/Trabajos.jpg" alt="Detalle de un trabajo con su consumo de tokens y su registro" width="440"></a><br>
+      <sub><b>Trabajos</b> · tokens y registro</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/VistaPrevia.jpg"><img src="web/design/capturas_design/readme/VistaPrevia.jpg" alt="Vista previa con la app generada en marcha" width="440"></a><br>
+      <sub><b>Vista previa</b> · app en marcha</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/Ajustes.jpg"><img src="web/design/capturas_design/readme/Ajustes.jpg" alt="Ajustes con el modelo por agente" width="440"></a><br>
+      <sub><b>Ajustes</b> · modelo por agente</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <a href="web/design/capturas_design/Dashboard_Error.jpg"><img src="web/design/capturas_design/readme/Dashboard_Error.jpg" alt="Dashboard con un trabajo en error" width="440"></a><br>
+      <sub><b>Dashboard con error</b> · intervención necesaria</sub>
+    </td>
+  </tr>
+</table>
 
 Repositorio: <https://github.com/jtarifap/FactoryOS>
 
@@ -112,7 +134,8 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - `web/navigation.ts`: items del menú lateral y sincronización de la vista activa con el hash.
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
 - `tests/`: pruebas de API, ZIP, preview y landing.
-- `web/design/capturas_design/`: capturas del panel que ilustran este README.
+- `web/design/capturas_design/`: capturas originales del panel a tamaño completo.
+- `web/design/capturas_design/readme/`: copias normalizadas a 1905×861 (mismo tamaño, relleno del color de fondo) que usa la rejilla de este README; el enlace de cada captura abre el original.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.
 - `QA_REPORT.md` se genera con evidencias reales (build/test).

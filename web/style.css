@@ -63,7 +63,7 @@ html[data-demo="on"] button:disabled{cursor:not-allowed;opacity:.45}
    del header (el border-bottom se mantiene visible porque el header crece en alto). */
 @media (max-width: 640px){
   .app-shell>header{height:auto;min-height:48px;gap:8px;padding:0 12px}
-  header .brand{font-size:15px;gap:12px}
+  header .brand{gap:12px}
   header .brand svg{width:24px;height:24px}
   header .brand-name{font-size:15px}
   .header-status-group{gap:6px}

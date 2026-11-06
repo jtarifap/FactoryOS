@@ -4,13 +4,6 @@ export type ModificationScope = "quick" | "full";
 export const QUICK_SCOPE_MAX_CHARS = 600;
 
 /**
- * Token budget for a quick text or style change. The agent's first turn already
- * costs ~75k tokens of base context, so the limit must leave room for a couple
- * of edits without allowing a runaway loop.
- */
-export const QUICK_SCOPE_BUDGET = 150_000;
-
-/**
  * Terms that imply new behaviour, structure or dependencies. Their presence
  * means the change must go through the full pipeline, even when it is short.
  */

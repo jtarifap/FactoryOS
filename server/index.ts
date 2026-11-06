@@ -19,7 +19,7 @@ import { mergeModelLists, modelsFromCatalog, parseModelBlocks, isModelId, type M
 import { findOpenCodeDbPath, missingProviders, readConnectedProviderIds } from "./opencode-providers.js";
 import { readTokenUsageFromDb } from "./session-usage.js";
 import { classifyModification, type ModificationScope } from "./modification-scope.js";
-import { isOverBudget, resolveBudget, DEFAULT_FULL_BUDGET } from "./job-budget.js";
+import { isOverBudget, resolveBudget, UNLIMITED_BUDGET } from "./job-budget.js";
 import { resolveProjectDirectory } from "./project-paths.js";
 import { authorizeRequest } from "./request-security.js";
 import { readProjectFile, redactSecrets } from "./project-security.js";
@@ -417,7 +417,7 @@ function planBudget(directory: string): unknown {
 }
 
 /** Runs one agent file with an explicit model. `runAgent` wraps the configured pipeline agents. */
-function runAgentFor(j: Job, agent: string, model: string, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
+function runAgentFor(j: Job, agent: string, model: string, prompt: string, budget: number | (() => number) = UNLIMITED_BUDGET): Promise<boolean> {
   return new Promise(resolve => {
     if (j.status === "cancelled") return resolve(false);
     j.phase = `${agent} · ${model}`; save();
@@ -438,9 +438,10 @@ function runAgentFor(j: Job, agent: string, model: string, prompt: string, budge
     // tree is stopped as soon as the limit is crossed.
     const budgetTimer = setInterval(() => {
       if (finished || j.status === "cancelled") return;
+      const limit = typeof budget === "function" ? budget() : budget;
+      if (limit <= 0) return;
       const stored = readTokenUsageFromDb(jobDatabasePath(j.id));
       const used = stored?.total ?? j.tokens?.total ?? 0;
-      const limit = typeof budget === "function" ? budget() : budget;
       if (!isOverBudget(used, limit)) return;
       j.budgetExceeded = true;
       j.lastError = `${agent}: presupuesto de tokens superado (${used} > ${limit}).`;
@@ -506,7 +507,7 @@ function runAgentFor(j: Job, agent: string, model: string, prompt: string, budge
 }
 
 /** Pipeline agents run with the model selected for their role in settings. */
-function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
+function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() => number) = UNLIMITED_BUDGET): Promise<boolean> {
   return runAgentFor(j, agent, effectiveModel(agent), prompt, budget);
 }
 
@@ -631,7 +632,7 @@ async function worker() {
       } else if (j.scope === "quick") {
         // Cambio puntual: un solo agente y sin regenerar diseno ni entrega.
         log(j, validation.message);
-        log(j, "Modificacion puntual: se ejecuta solo el developer, sin diseno ni entrega.");
+        log(j, "Modificacion puntual: la aplica un unico agente (quick-developer), sin diseno ni entrega.");
         const quickPrompt = [
           "Aplica un cambio puntual en este proyecto existente.",
           "Modifica solo lo necesario para cumplir la peticion; no rediseñes la interfaz ni regeneres la documentacion de entrega.",

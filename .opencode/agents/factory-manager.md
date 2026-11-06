@@ -108,10 +108,10 @@ Crea el fichero `factory/plan.json` con este formato exacto:
 }
 
 Orientación para "presupuesto_tokens": simple 800000, estandar 2000000,
-complejo 5000000. Un solo turno de agente consume unos 75000 tokens de
-contexto base, así que presupuestos menores abortan el pipeline sin trabajar.
-La aplicación que te ejecuta mide y aplica el presupuesto con un mínimo de
-400000; tú solo lo declaras.
+complejo 5000000. Es informativo: la aplicación no corta por defecto y solo
+aplica un límite si se configura `FACTORYOS_TOKEN_BUDGET`. Un turno de agente
+consume unos 75000 tokens de contexto base, así que valores menores no son
+realistas.
 
 Después invoca al primer agente del pipeline como subagente y pásale `factory/plan.json`. Coordina las fases siguientes en el orden de `pipeline`; no ejecutes fases omitidas ni sustituyas las decisiones del plan.
 

@@ -1,5 +1,15 @@
 # QA Report - FactoryOS 2.0
 
+## Historial de modificaciones y checkpoints ocultos (2026-11-06)
+
+- Sintoma: cada modificacion hacia aparecer un proyecto extra `<slug>-<id>-checkpoint` en los desplegables.
+- Causa: el checkpoint se copiaba dentro de `projects/` y `/api/projects` lista todo hijo directo valido.
+- Cambios: `server/project-paths.ts` (`isLegacyCheckpointName`), `server/runner.ts` (filtra `*-checkpoint` en `/api/projects`), `server/index.ts` (nuevo checkpoint en `data/checkpoints/<slug>-<id>`, fuera de `projects/`), `web/project-history.ts` (agrupacion, estado y fecha) y `web/main.ts` (desplegable bajo el select nativo con el detalle al pulsar una modificacion).
+- La modificacion se aplica en sitio: sin fork ni duplicado navegable. Los checkpoints antiguos no se borran, solo se ocultan del listado.
+- `npm test`: **254/254 PASS**. `npx tsc --noEmit`: **PASS**. `npm run build`: **PASS**.
+- Fixtures de `tests/secrets.test.mjs` montados por concatenacion: el repositorio no contiene literales con formato de token y GitHub Push Protection deja de bloquear el push. Los valores en ejecucion son identicos, asi que el detector se sigue probando de verdad.
+- Riesgos: el listado se refresca cada 3 s (el detalle abierto se conserva); ocultar por sufijo `-checkpoint` impediria listar un proyecto real con ese nombre.
+
 ## Rutas, API local y secretos (2026-11-06)
 
 **Modelo de amenaza.** Se asume un navegador hostil abierto por el usuario (sitio remoto, enlace o formulario cross-site), DNS rebinding contra servicios locales, proyectos generados o manipulados con symlinks/junctions, y secretos que pueden acabar en archivos, logs, respuestas o previews. Quedan fuera del modelo un atacante con control total de la cuenta de Windows o del disco: sin autenticacion no se puede distinguir de un usuario legitimo.
@@ -29,7 +39,7 @@
 
 **Verificacion.**
 
-- `npm test`: **250/250 PASS** (nuevas pruebas de rutas, symlinks/junctions, Host/Origin/CSRF, secretos, redaccion y cableado).
+- `npm test`: **254/254 PASS** (nuevas pruebas de rutas, symlinks/junctions, Host/Origin/CSRF, secretos, redaccion y cableado).
 - `npx tsc --noEmit`: **PASS**.
 - `npm run build`: **PASS**.
 

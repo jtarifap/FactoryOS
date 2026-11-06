@@ -21,7 +21,7 @@ test("functional requests stay in the full pipeline", () => {
 
 test("long requests and empty input never take the quick path", () => {
   assert.equal(QUICK_SCOPE_MAX_CHARS, 600);
-  assert.equal(QUICK_SCOPE_BUDGET, 60_000);
+  assert.equal(QUICK_SCOPE_BUDGET, 150_000);
   assert.equal(classifyModification("x".repeat(601)), "full");
   assert.equal(classifyModification(""), "full");
   assert.equal(classifyModification("   "), "full");

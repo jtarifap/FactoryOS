@@ -338,6 +338,34 @@ test("a modification exposes a scope selector and sends the chosen scope", async
   assert.equal(scope.hidden, true, "Consultations must hide the scope selector");
 });
 
+test("submitting a modification switches to the jobs view to follow progress", async () => {
+  const { elements } = await mount();
+  const directory = elements.find(el => el.dataset.role === "existing-directory");
+  directory.value = "projects/sample";
+  directory.onchange();
+  elements.find(el => el.placeholder === "Nombre del proyecto").value = "Ajuste";
+  elements.find(el => el.tagName === "TEXTAREA").value = "Cambia el color del boton";
+  const form = elements.find(el => typeof el.onsubmit === "function");
+  await form.onsubmit({ preventDefault() {} });
+
+  const visible = elements.filter(el => el.className === "view" && el.hidden !== true);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].dataset.view, "trabajos");
+  assert.ok(visible[0].textContent.includes("Trabajos") || visible[0].dataset.view === "trabajos");
+});
+
+test("creating a new project does not jump to jobs", async () => {
+  const { elements } = await mount();
+  elements.find(el => el.placeholder === "Nombre del proyecto").value = "Nuevo";
+  elements.find(el => el.tagName === "TEXTAREA").value = "Crea una landing sencilla";
+  const form = elements.find(el => typeof el.onsubmit === "function");
+  await form.onsubmit({ preventDefault() {} });
+
+  const visible = elements.filter(el => el.className === "view" && el.hidden !== true);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].dataset.view, "dashboard");
+});
+
 test("theme toggle updates the root theme, saved preference and accessible icon", async () => {
   const { document, elements, storage } = await mount();
   const button = elements.find(el => el.className === "secondary theme-toggle");

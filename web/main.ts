@@ -454,6 +454,8 @@ function renderCreateJob(): HTMLElement {
     }
     await loadJobs();
     await loadProjects();
+    // A modification runs in the background: show its progress immediately.
+    if (action === "modify") navigateTo("trabajos");
   };
 
   section.appendChild(form);
@@ -974,6 +976,13 @@ function renderViewShell(view: ViewId, content: HTMLElement): HTMLElement {
 }
 
 /** Muestra la vista indicada y marca el item activo del menu. */
+/** Cambia de vista y mantiene el hash en la URL sin recargar la pagina. */
+function navigateTo(view: ViewId) {
+  showView(view);
+  const hash = hashForView(view);
+  if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+}
+
 function showView(view: ViewId) {
   state.activeView = view;
   for (const element of Array.from(document.querySelectorAll<HTMLElement>(".view"))) {

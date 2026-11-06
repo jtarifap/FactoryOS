@@ -30,9 +30,10 @@ test("worker sends a question directly to Factory-manager and project jobs throu
   const quickStart = worker.indexOf('j.scope === "quick"');
   const quickEnd = worker.indexOf("} else {", quickStart);
   assert.ok(quickStart >= 0 && quickEnd > quickStart, "Missing quick modification branch");
-  assert.ok(/runAgent\(j, "developer"/.test(worker.slice(quickStart, quickEnd)), "The quick path runs the developer");
+  assert.ok(/runAgentFor\(j, "quick-developer"/.test(worker.slice(quickStart, quickEnd)), "The quick path runs its primary agent");
   const outsideQuick = worker.slice(0, quickStart) + worker.slice(quickEnd);
-  assert.ok(!/runAgent\(j, "developer"/.test(outsideQuick), "Factory-manager must choose and delegate the full pipeline");
+  assert.ok(!/runAgent(?:For)?\(j, "quick-developer"/.test(outsideQuick), "Only the quick path uses the primary quick agent");
+  assert.ok(!/runAgent\(j, "developer"/.test(worker), "Factory-manager must choose and delegate the full pipeline");
 });
 
 test("consultation form uses the query field as input and the response textarea as output", () => {

@@ -22,7 +22,7 @@ test("worker holds its lease until its child processes are closed", () => {
 });
 
 test("consultation, project agent and npm children are registered against their job", () => {
-  assert.match(between("function runAgent(", "function runConsultation("), /jobProcesses\.add\(j\.id, child\)/);
+  assert.match(between("function runAgentFor(", "function runConsultation("), /jobProcesses\.add\(j\.id, child\)/);
   assert.match(between("function runConsultation(", "function execInProject("), /jobProcesses\.add\(j\.id, child\)/);
   assert.match(between("function execInProject(", "async function verifyProject("), /jobProcesses\.add\(j\.id, proc\)/);
   assert.match(between("function listOpenCodeModels(", "async function validateConfiguredModels("), /jobId\?: string[\s\S]*jobProcesses\.add\(jobId, child\)/);

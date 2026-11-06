@@ -416,10 +416,10 @@ function planBudget(directory: string): unknown {
   }
 }
 
-function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
+/** Runs one agent file with an explicit model. `runAgent` wraps the configured pipeline agents. */
+function runAgentFor(j: Job, agent: string, model: string, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
   return new Promise(resolve => {
     if (j.status === "cancelled") return resolve(false);
-    const model = effectiveModel(agent);
     j.phase = `${agent} · ${model}`; save();
     const args = ["run", "--model", model, "--agent", agent, "--format", "json"];
     if (settings.autoApprove) args.push("--auto");
@@ -428,12 +428,13 @@ function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() =
     jobProcesses.add(j.id, child);
     active = { id: j.id, child };
     let finished = false;
+    let wrongAgentMode = false;
     let rawOutput = "";
     let tailOutput = "";
     let logBuffer = "";
     const timer = setTimeout(() => { log(j, "Tiempo máximo de fase agotado (20 min)."); killTree(child); }, 20 * 60 * 1000);
     // The plan budget is enforced while the phase runs, not afterwards: the
-    // real usage is read from the job database every 15 seconds and the process
+    // real usage is read from the job database every 5 seconds and the process
     // tree is stopped as soon as the limit is crossed.
     const budgetTimer = setInterval(() => {
       if (finished || j.status === "cancelled") return;
@@ -445,7 +446,7 @@ function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() =
       j.lastError = `${agent}: presupuesto de tokens superado (${used} > ${limit}).`;
       log(j, `Presupuesto superado en ${agent}: ${used} tokens > ${limit}. Se detiene la fase.`);
       killTree(child);
-    }, 15_000);
+    }, 5_000);
     const flushLogs = (final = false) => {
       const lines = logBuffer.split(/\r?\n/);
       logBuffer = final ? "" : lines.pop() || "";
@@ -460,6 +461,14 @@ function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() =
       tailOutput = (tailOutput + text).slice(-20000);
       logBuffer += text;
       flushLogs();
+      // opencode silently falls back to the default agent when `--agent` points
+      // to a subagent. Stop immediately instead of paying for the wrong agent.
+      if (!wrongAgentMode && /is a subagent, not a primary agent/i.test(text)) {
+        wrongAgentMode = true;
+        j.lastError = `${agent}: opencode no permite lanzar un subagente con --agent. Se detiene la fase para no ejecutar el agente equivocado.`;
+        log(j, "El agente no es primario: opencode iba a usar el agente por defecto. Se detiene la fase.");
+        killTree(child);
+      }
     };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
@@ -471,6 +480,13 @@ function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() =
       log(j, `Agente ${agent} · modelo ${model}: salida ${code} · ${formatTokenUsage(usage)}`);
       if (code === 0 && j.status !== "cancelled") return resolve(true);
       if (j.status === "cancelled") return resolve(false);
+      // A budget stop and a wrong agent mode already carry their own reason;
+      // the generic exit message must not overwrite them.
+      if (j.budgetExceeded || wrongAgentMode) {
+        log(j, `Motivo del fallo: ${j.lastError}`);
+        save();
+        return resolve(false);
+      }
       // Persist the real reason so the UI does not just say "Falló <agent>".
       const reason = detectModelError(tailOutput) || summarizeOutputError(tailOutput);
       if (reason) {
@@ -487,6 +503,11 @@ function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() =
       resolve(false);
     });
   });
+}
+
+/** Pipeline agents run with the model selected for their role in settings. */
+function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
+  return runAgentFor(j, agent, effectiveModel(agent), prompt, budget);
 }
 
 /** Single Factory-manager turn used to answer a consultation without starting the project pipeline. */
@@ -617,7 +638,9 @@ async function worker() {
           "No anadas funcionalidad, dependencias ni archivos nuevos salvo que la peticion lo exija de forma explicita.",
           `Peticion: ${j.request}`,
         ].join("\n");
-        const quickOk = await runAgent(j, "developer", quickPrompt, resolveBudget("quick", undefined));
+        // `developer` is a subagent and opencode cannot launch it directly, so
+        // the quick path uses a dedicated primary agent with the same model.
+        const quickOk = await runAgentFor(j, "quick-developer", effectiveModel("developer"), quickPrompt, resolveBudget("quick", undefined));
         if ((j.status as Status) === "cancelled") return;
         if (!quickOk) {
           if (j.budgetExceeded) {

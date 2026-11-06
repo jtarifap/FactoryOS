@@ -6,7 +6,7 @@ const read = relative => fs.readFileSync(new URL(`../${relative}`, import.meta.u
 
 test("project agents stream JSON and persist token usage per job", () => {
   const server = read("server/index.ts");
-  const runAgent = server.slice(server.indexOf("function runAgent("), server.indexOf("function runConsultation("));
+  const runAgent = server.slice(server.indexOf("function runAgentFor("), server.indexOf("function runConsultation("));
   assert.match(runAgent, /"--format", "json"/);
   assert.match(runAgent, /opencodeEnv\(j\.id\)/);
   assert.match(runAgent, /recordTokenUsage\(j, rawOutput\)/);

@@ -4,8 +4,10 @@ import {
   buildPreviewCommand,
   choosePreviewScript,
   detectPreviewUrl,
+  isSafePreviewArg,
   parsePackageJson,
   splitExtraArgs,
+  validatePreviewArgs,
 } from "../server/preview-plan.ts";
 
 test("a package.json with a UTF-8 BOM is parsed", () => {
@@ -49,6 +51,21 @@ test("the extra arguments are split respecting quotes", () => {
   assert.deepEqual(splitExtraArgs("--host 0.0.0.0 --title 'Mi App'"), ["--host", "0.0.0.0", "--title", "Mi App"]);
   assert.deepEqual(splitExtraArgs("   "), []);
   assert.deepEqual(splitExtraArgs(""), []);
+});
+
+test("ordinary preview arguments are accepted", () => {
+  for (const arg of ["--host", "127.0.0.1", "--port=4000", "Mi App", "--base=/app", "-p", "8080"]) {
+    assert.equal(isSafePreviewArg(arg), true, arg);
+  }
+  assert.equal(validatePreviewArgs(["--host", "127.0.0.1"]), null);
+});
+
+test("shell metacharacters in preview arguments are rejected", () => {
+  for (const arg of ["x & calc", "x;calc", "x|calc", "x>out", "x<in", "%PATH%", "!cmd!", "$(calc)", "`calc`", 'a"b', "a'b", "a\nb", "a\rb", "a\0b", "a*b", "a?b", "a{b}", "a[b]", "a^b", "a(b)"]) {
+    assert.equal(isSafePreviewArg(arg), false, JSON.stringify(arg));
+  }
+  assert.ok(validatePreviewArgs(["--host", "127.0.0.1 & calc"]));
+  assert.ok(validatePreviewArgs(Array.from({ length: 33 }, () => "--flag")));
 });
 
 test("the port the app prints in its logs is the one that is used", () => {

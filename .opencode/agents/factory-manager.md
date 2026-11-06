@@ -1,6 +1,6 @@
 ---
 description: Orquestador de la factoría. Clasifica el proyecto por complejidad, decide si hay interfaz, define el stack y elige qué agentes intervienen.
-model: opencode/deepseek-v4.1-flash-free
+model: openrouter/nvidia/nemotron-3.5-super-vl:free
 mode: primary
 temperature: 0.1
 tools:

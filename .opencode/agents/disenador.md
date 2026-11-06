@@ -1,6 +1,6 @@
 ---
 description: Diseña la interfaz y la experiencia de usuario antes del desarrollo. Solo interviene si el proyecto tiene interfaz (ui = true).
-model: opencode/deepseek-v4.1-flash-free
+model: openrouter/nvidia/nemotron-3.5-super-vl:free
 mode: subagent
 temperature: 0.7
 tools:

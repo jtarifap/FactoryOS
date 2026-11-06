@@ -4,11 +4,78 @@ import path from "node:path";
 export type ProjectScanLimits = { maxEntries: number; maxFileBytes: number; maxTotalBytes: number };
 const DEFAULT_LIMITS: ProjectScanLimits = { maxEntries: 20_000, maxFileBytes: 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 };
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", ".cache"]);
-const HIGH_CONFIDENCE_SECRET_PATTERNS = [
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,
-  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+
+const HIGH_CONFIDENCE_SECRET_PATTERNS: RegExp[] = [
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bASIA[0-9A-Z]{16}\b/g,
+  /\baws_secret_access_key\b\s*[:=]\s*['"]?[A-Za-z0-9/+=]{40}\b/gi,
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  /\b(?:sk|rk)_live_[A-Za-z0-9]{20,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\bnpm_[A-Za-z0-9]{36}\b/g,
+  /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g,
+  /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
+  /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,
+  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^:\s/@]+:[^@\s/]+@/gi,
 ];
+
+const SECRET_ASSIGNMENT_PATTERN =
+  /\b(api[_-]?key|apikey|secret(?:[_-]?key)?|client[_-]?secret|access[_-]?token|auth[_-]?token|refresh[_-]?token|password|passwd|private[_-]?key)\b\s*[:=]\s*["']?([A-Za-z0-9_\-./+=]{20,})/gi;
+
+const PLACEHOLDER_SECRET = [
+  /^x{4,}$/i,
+  /^\*{4,}$/,
+  /^\.{3,}$/,
+  /^changeme/i,
+  /^change[_-]?me/i,
+  /^example/i,
+  /^sample/i,
+  /^dummy/i,
+  /^fake/i,
+  /^test/i,
+  /^placeholder/i,
+  /^your[_-]/i,
+  /redacted/i,
+  /^none$/i,
+  /^null$/i,
+  /^undefined$/i,
+  /^(?:process\.env|import\.meta\.env|os\.environ)/i,
+];
+
+function isPlaceholderSecret(value: string): boolean {
+  return PLACEHOLDER_SECRET.some(pattern => pattern.test(value));
+}
+
+/** Returns true when the text contains a credential pattern. Never returns the value. */
+export function containsSecret(content: string): boolean {
+  for (const pattern of HIGH_CONFIDENCE_SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(content)) return true;
+  }
+  SECRET_ASSIGNMENT_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SECRET_ASSIGNMENT_PATTERN.exec(content)) !== null) {
+    if (!isPlaceholderSecret(match[2])) return true;
+  }
+  return false;
+}
+
+/** Replaces credential values before they reach logs, API responses or reports. */
+export function redactSecrets(text: string): string {
+  let output = String(text ?? "");
+  for (const pattern of HIGH_CONFIDENCE_SECRET_PATTERNS) {
+    output = output.replace(new RegExp(pattern.source, pattern.flags), "[REDACTADO]");
+  }
+  SECRET_ASSIGNMENT_PATTERN.lastIndex = 0;
+  return output.replace(SECRET_ASSIGNMENT_PATTERN, (match, _name: string, value: string) => {
+    if (isPlaceholderSecret(value)) return match;
+    return `${match.slice(0, match.length - value.length)}[REDACTADO]`;
+  });
+}
 
 export class ProjectScanLimitError extends Error {
   constructor() {
@@ -21,11 +88,17 @@ export function isSensitiveRelativePath(relative: string): boolean {
   const parts = relative.replace(/\\/g, "/").split("/").filter(Boolean).map(part => part.toLowerCase());
   if (parts.some(part => EXCLUDED_DIRECTORIES.has(part))) return true;
   const name = parts.at(-1) || "";
-  if (name.startsWith(".env")) return true;
-  if (/^(?:id_rsa|id_ed25519)(?:\.pub)?$/.test(name)) return true;
+  if (name.startsWith(".env")) return !/\.(?:example|sample|template|dist)$/i.test(name);
+  if (/^(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)$/.test(name)) return true;
   if (/^(?:credentials?|secrets?)(?:[._-].*)?$/.test(name)) return true;
+  if (/^(?:\.npmrc|\.netrc|\.pypirc|\.git-credentials)$/.test(name)) return true;
+  if (/^terraform\.tfstate(?:\.backup)?$/.test(name)) return true;
+  if (parts.includes(".docker") && name === "config.json") return true;
   if (/service-account.*\.json$/.test(name)) return true;
-  if (/\.(?:pem|key|p12|pfx|keystore)$/.test(name)) return true;
+  if (/\.(?:key|p12|pfx|keystore|jks)$/.test(name)) return true;
+  // A bare certificate is public; private material is still caught by the
+  // content fingerprint and by names such as private.pem / server.pem.
+  if (/\.pem$/.test(name) && !/^(?:cert|certs?|ca|chain|public)/i.test(name)) return true;
   return false;
 }
 
@@ -131,7 +204,7 @@ function scanProjectFiles(projectRoot: string, snapshotRoot: string | null, over
           continue;
         }
         const content = data.toString("utf8");
-        if (HIGH_CONFIDENCE_SECRET_PATTERNS.some(pattern => pattern.test(content))) {
+        if (containsSecret(content)) {
           candidates.add(relative);
           continue;
         }
@@ -186,5 +259,42 @@ export function resolveProjectFile(
     return { absolutePath: realFile, relativePath: realRelativePath };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Resolves and reads a static project file through a single descriptor.
+ *
+ * The descriptor pins the opened file even if the path is replaced after
+ * validation. `O_NOFOLLOW` is used where the platform provides it; Windows
+ * leaves it undefined, so containment is still enforced by `resolveProjectFile`
+ * before the open.
+ */
+export function readProjectFile(
+  projectRoot: string,
+  encodedRelativePath: string,
+  maxBytes = 20 * 1024 * 1024
+): { data: Buffer; relativePath: string } | null {
+  const resolved = resolveProjectFile(projectRoot, encodedRelativePath);
+  if (!resolved) return null;
+
+  let fd: number | null = null;
+  try {
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+    fd = fs.openSync(resolved.absolutePath, flags);
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile() || stats.size > maxBytes) return null;
+    const data = fs.readFileSync(fd);
+    if (data.length > maxBytes) return null;
+    // Previews must not become a side channel for a credential that lives in
+    // an otherwise ordinary file (for example a database URL in notes.txt).
+    if (!data.includes(0) && containsSecret(data.toString("utf8"))) return null;
+    return { data, relativePath: resolved.relativePath };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
   }
 }

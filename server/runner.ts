@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolveProjectFile } from "./project-security.js";
-import { buildPreviewCommand, choosePreviewScript, detectPreviewUrl, parsePackageJson, splitExtraArgs } from "./preview-plan.js";
+import { readProjectFile, redactSecrets } from "./project-security.js";
+import { buildPreviewCommand, choosePreviewScript, detectPreviewUrl, parsePackageJson, splitExtraArgs, validatePreviewArgs } from "./preview-plan.js";
+import { isLegacyCheckpointName, resolveProjectDirectory } from "./project-paths.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECTS = path.join(ROOT, "projects");
@@ -14,18 +15,12 @@ type Runner = { port: number; url: string; proc: ChildProcess; logs: string[] };
 const runners = new Map<string, Runner>();
 
 function safeProjectPath(input: string): string | null {
-  if (!input) return null;
-  const dir = path.resolve(PROJECTS, path.basename(input));
-  try {
-    const projectsRoot = fs.realpathSync(PROJECTS);
-    const realDir = fs.realpathSync(dir);
-    const relative = path.relative(projectsRoot, realDir);
-    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
-    if (!fs.statSync(realDir).isDirectory()) return null;
-    return realDir;
-  }
-  catch { return null; }
+  const result = resolveProjectDirectory(PROJECTS, input);
+  return result.ok ? result.directory : null;
 }
+
+const publicLogs = (logs: string[], count: number): string[] =>
+  logs.slice(-count).map(redactSecrets);
 
 export type SpawnTaskkill = (command: string, args: string[]) => ChildProcess;
 
@@ -170,7 +165,9 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
   // List projects
   if (u.pathname === "/api/projects" && req.method === "GET") {
     const list = fs.readdirSync(PROJECTS, { withFileTypes: true })
-      .filter(d => d.isDirectory())
+      // A junction is reported as a directory by some Windows versions. Listing
+      // it would expose a folder outside projects/, so it is resolved first.
+      .filter(d => d.isDirectory() && !isLegacyCheckpointName(d.name) && resolveProjectDirectory(PROJECTS, d.name).ok)
       .map(d => {
         const dir = path.join(PROJECTS, d.name);
         return { name: d.name, path: dir, hasPackage: fs.existsSync(path.join(dir, "package.json")), hasIndex: fs.existsSync(path.join(dir, "index.html")) };
@@ -196,7 +193,7 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
     }
     if (runners.has(dir)) {
       const r = runners.get(dir)!;
-      reply(200, { ok: true, mode: "dynamic", url: r.url, port: r.port, logs: r.logs.slice(-30) });
+      reply(200, { ok: true, mode: "dynamic", url: r.url, port: r.port, logs: publicLogs(r.logs, 30) });
       return true;
     }
     const pkg = parsePackageJson(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
@@ -208,12 +205,14 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
     }
     const logs: string[] = [];
     const extraArgs = splitExtraArgs(String(input?.args || ""));
+    const argsError = validatePreviewArgs(extraArgs);
+    if (argsError) { reply(400, { error: argsError }); return true; }
     const install = input?.install !== false;
 
     if (install && !fs.existsSync(path.join(dir, "node_modules"))) {
       const installed = await installDependencies(dir, logs);
       if (!installed) {
-        reply(422, { error: "Faltan las dependencias y `npm install` no pudo completarse. Revisa los logs.", logs: logs.slice(-30) });
+        reply(422, { error: "Faltan las dependencias y `npm install` no pudo completarse. Revisa los logs.", logs: publicLogs(logs, 30) });
         return true;
       }
     }
@@ -248,20 +247,20 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
     }
 
     if (exited && !answered) {
-      reply(422, { error: `La app se detuvo antes de arrancar (codigo ${exitCode}). Revisa los logs.`, logs: logs.slice(-40), script });
+      reply(422, { error: `La app se detuvo antes de arrancar (codigo ${exitCode}). Revisa los logs.`, logs: publicLogs(logs, 40), script });
       return true;
     }
 
     const resolved = await resolvePreviewUrl(logs, port, !exited);
     if (!resolved) {
       if (!exited) await killTree(proc);
-      reply(422, { error: "La app arranco pero no responde en ningun puerto. Revisa los logs o indica el puerto en los argumentos extra.", logs: logs.slice(-40), script });
+      reply(422, { error: "La app arranco pero no responde en ningun puerto. Revisa los logs o indica el puerto en los argumentos extra.", logs: publicLogs(logs, 40), script });
       return true;
     }
 
     const runner: Runner = { port: resolved.port, url: resolved.url, proc, logs };
     runners.set(dir, runner);
-    reply(200, { ok: true, mode: "dynamic", url: resolved.url, port: resolved.port, script, logs: logs.slice(-30) });
+    reply(200, { ok: true, mode: "dynamic", url: resolved.url, port: resolved.port, script, logs: publicLogs(logs, 30) });
     return true;
   }
 
@@ -288,7 +287,7 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
       running: !!r,
       url: r ? r.url : (fs.existsSync(path.join(dir, "index.html")) ? `${apiOrigin}/preview-static/${encodeURIComponent(path.basename(dir))}/` : null),
       port: r ? r.port : 0,
-      logs: r ? r.logs.slice(-50) : []
+      logs: r ? publicLogs(r.logs, 50) : []
     });
     return true;
   }
@@ -303,16 +302,19 @@ export async function handlePreview(req: http.IncomingMessage, res: http.ServerR
     const projectRoot = safeProjectPath(projectName);
     if (!projectRoot) { reply(404, { error: "No encontrado" }); return true; }
     const encodedRelativePath = parts.slice(2).join("/") || "index.html";
-    const resolvedFile = resolveProjectFile(projectRoot, encodedRelativePath);
+    const resolvedFile = readProjectFile(projectRoot, encodedRelativePath);
     if (!resolvedFile) { reply(404, { error: "No encontrado" }); return true; }
-    const filePath = resolvedFile.absolutePath;
-    try {
-      const data = fs.readFileSync(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "application/javascript", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".map": "application/json" };
-      res.writeHead(200, { "Content-Type": mime[ext] || "text/plain; charset=utf-8" });
-      res.end(data);
-    } catch { reply(404, { error: "No encontrado" }); }
+    const ext = path.extname(resolvedFile.relativePath).toLowerCase();
+    const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "application/javascript", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".map": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": mime[ext] || "text/plain; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      // The preview is meant to be framed by the local panel only.
+      "Content-Security-Policy": "frame-ancestors http://127.0.0.1:5173 http://localhost:5173 http://127.0.0.1:4177 http://localhost:4177",
+    };
+    res.writeHead(200, headers);
+    res.end(resolvedFile.data);
     return true;
   }
 

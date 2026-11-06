@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 
 // Minimal DOM and HTTP boundary: execute the actual UI without calling paid models.
-async function mount(testResponse = { ok: true }, mode = "independent", initialJobs = []) {
+async function mount(testResponse = { ok: true }, mode = "independent", initialJobs = [], initialProjects = []) {
   const elements = [];
   class ClassList {
     constructor(element) { this.element = element; }
@@ -74,6 +74,7 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
       return { ok: true, json: async () => ({ id }) };
     }
     if (url === "/api/jobs") return { ok: true, json: async () => latestJobs };
+    if (url === "/api/projects") return { ok: true, json: async () => initialProjects };
     if (url === "/api/models/test" && testResponse instanceof Error) throw testResponse;
     return { ok: true, json: async () => url === "/api/settings" ? settings
       : url === "/api/models" ? { models: [
@@ -95,6 +96,7 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
   const tokenModule = await import("../shared/token-usage.ts");
   const modelSelectModule = await import("../web/model-select.ts");
   const dashboardModule = await import("../web/dashboard.ts");
+  const projectHistoryModule = await import("../web/project-history.ts");
   const navigationModule = await import("../web/navigation.ts");
   const demoModule = await import("../web/demo.ts");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
@@ -106,6 +108,11 @@ async function mount(testResponse = { ok: true }, mode = "independent", initialJ
     buildModelGroups: modelSelectModule.buildModelGroups,
     buildDashboardRows: dashboardModule.buildDashboardRows,
     buildDashboardStats: dashboardModule.buildDashboardStats,
+    projectNameFromDirectory: projectHistoryModule.projectNameFromDirectory,
+    isModificationJob: projectHistoryModule.isModificationJob,
+    buildProjectGroups: projectHistoryModule.buildProjectGroups,
+    statusLabel: projectHistoryModule.statusLabel,
+    formatModificationDate: projectHistoryModule.formatModificationDate,
     DEFAULT_VIEW: navigationModule.DEFAULT_VIEW,
     MENU_ITEMS: navigationModule.MENU_ITEMS,
     hashForView: navigationModule.hashForView,

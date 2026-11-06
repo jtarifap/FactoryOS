@@ -13,6 +13,8 @@ export type Job = {
   name: string;
   request: string;
   requestKind?: "project" | "question";
+  action?: "new" | "modify" | "question";
+  checkpoint?: string;
   answer?: string;
   tokens?: TokenUsage;
   status: string;

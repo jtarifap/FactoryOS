@@ -1,6 +1,6 @@
 ---
 description: Revisa calidad y funcionamiento del código y el cumplimiento del diseño. Solo interviene en proyectos de complejidad estándar o compleja.
-model: opencode/deepseek-v4.1-flash-free
+model: openrouter/nvidia/nemotron-3.5-super-vl:free
 mode: subagent
 temperature: 0.1
 tools:

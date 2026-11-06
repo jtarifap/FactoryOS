@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isModelId } from "./model-list.js";
+import { atomicWriteFileSync } from "./atomic-write.js";
 
 export const AGENT_IDS = [
   "factory-manager",
@@ -72,7 +73,7 @@ export function syncAgentModelFiles(agentDirectory: string, models: AgentModelMa
   const changed: AgentId[] = [];
   for (const update of updates) {
     if (update.updated === update.original) continue;
-    fs.writeFileSync(update.file, update.updated, "utf8");
+    atomicWriteFileSync(update.file, update.updated, "utf8");
     changed.push(update.agent);
   }
   return changed;

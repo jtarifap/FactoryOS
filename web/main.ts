@@ -1,6 +1,7 @@
 ﻿import "./style.css";
 import { renderJobSummary, renderModelTooltip } from "./safe-dom";
 import { buildModelGroups, type ModelItem } from "./model-select";
+import { buildProjectGroups, formatModificationDate, isModificationJob, projectNameFromDirectory, statusLabel, type ModificationJob } from "./project-history";
 import { buildDashboardRows, buildDashboardStats, type DashboardJob } from "./dashboard";
 import { DEFAULT_VIEW, MENU_ITEMS, hashForView, viewFromHash, type ViewId } from "./navigation";
 import { readTheme, THEME_STORAGE_KEY, toggleTheme, type Theme } from "./theme";
@@ -112,6 +113,8 @@ const els = {
   dashboardCards: document.createElement("div"),
   dashboardTable: document.createElement("div"),
 };
+
+const projectPickers = new Map<HTMLSelectElement, { container: HTMLElement; mods: HTMLElement; detail: HTMLElement; openId: string }>();
 
 function qs<T extends HTMLElement>(sel: string): T {
   const el = document.querySelector<T>(sel);
@@ -363,6 +366,7 @@ function renderCreateJob(): HTMLElement {
   form.appendChild(request);
   form.appendChild(directoryLabel);
   form.appendChild(directory);
+  createProjectPicker(directory);
   form.appendChild(submit);
   form.appendChild(feedback);
 
@@ -397,12 +401,14 @@ function renderCreateJob(): HTMLElement {
     ev.preventDefault();
     feedback.textContent = "Enviando...";
     const kind = requestKind.value === "question" ? "question" : "project";
+    const action = kind === "question" ? "question" : directory.value ? "modify" : "new";
     const payload: Record<string, string> = {
       name: kind === "question" ? "Consulta" : name.value.trim(),
       request: kind === "question" ? name.value.trim() : request.value.trim(),
       requestKind: kind,
+      action,
     };
-    if (kind === "project" && directory.value) payload.directory = directory.value;
+    if (action === "modify") payload.directory = directory.value;
     const r = await apiFetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -443,6 +449,7 @@ function renderPreview(): HTMLElement {
 
   els.projectSelect.innerHTML = `<option value="">Selecciona proyecto...</option>`;
   row.appendChild(els.projectSelect);
+  createProjectPicker(els.projectSelect);
 
   const start = requiresApi(create("button", "Arrancar"));
   const stop = requiresApi(create("button", "Detener"));
@@ -667,6 +674,7 @@ async function loadJobs() {
   const sig = JSON.stringify(jobs.map(j => [j.id, j.requestKind, j.status, j.phase, j.updatedAt, j.lastError, j.answer, j.tokens, (j.logs || []).length]));
   if (sig === state.lastJobsSignature) {
     // Los datos no han cambiado: solo se refrescan los tiempos relativos del dashboard.
+    refreshProjectPickers();
     refreshDashboard();
     return;
   }
@@ -697,6 +705,12 @@ async function loadJobs() {
 
     const meta = create("small", `ID: ${job.id} · Actualizado: ${job.updatedAt}`);
     card.appendChild(meta);
+
+    if (isModificationJob(job)) {
+      const badge = create("span", `Modificación de ${projectNameFromDirectory(job.directory)}`);
+      badge.className = "modification-badge";
+      card.appendChild(badge);
+    }
 
     if (job.tokens && job.tokens.total > 0) {
       const tokens = create("div", `Tokens: ${formatTokenUsage(job.tokens)}`);
@@ -736,7 +750,8 @@ async function loadJobs() {
       const zip = requiresApi(create("button", "ZIP"));
       zip.className = "secondary";
       zip.onclick = async () => {
-        const r = await apiFetch(`/api/projects/zip?directory=${encodeURIComponent(job.directory)}`);
+        const projectName = job.directory.split(/[\\/]/).pop() || "";
+        const r = await apiFetch(`/api/projects/zip?directory=${encodeURIComponent(projectName)}`);
         if (!r.ok) {
           let message = "No se pudo generar el ZIP";
           try {
@@ -751,7 +766,7 @@ async function loadJobs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${job.directory.split(/[\\/]/).pop() || "proyecto"}.zip`;
+        a.download = `${projectName || "proyecto"}.zip`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -784,7 +799,95 @@ async function loadJobs() {
 
     els.jobList.appendChild(card);
   }
+  refreshProjectPickers();
   refreshDashboard();
+}
+
+/**
+ * Crea el contenedor que, debajo de un `<select>` de proyecto, muestra solo las
+ * modificaciones existentes para el proyecto seleccionado. El propio `<select>`
+   nativo sigue siendo el único punto de selección y permanece visible.
+ */
+function createProjectPicker(select: HTMLSelectElement): HTMLElement {
+  const container = create("div");
+  container.className = "project-picker";
+  container.dataset.role = "project-picker";
+  container.hidden = true;
+
+  const mods = create("div");
+  mods.className = "project-picker-mods";
+  mods.hidden = true;
+
+  const header = create("strong", "Modificaciones");
+  header.className = "project-picker-mods-header";
+  mods.appendChild(header);
+
+  const detail = create("div");
+  detail.className = "project-picker-detail modification-detail";
+  detail.hidden = true;
+
+  container.appendChild(mods);
+  container.appendChild(detail);
+
+  const parent = select.parentElement;
+  if (parent && typeof parent.insertBefore === "function") parent.insertBefore(container, select.nextSibling);
+  else if (parent) parent.appendChild(container);
+  else document.body.appendChild(container);
+
+  const picker = { container, mods, detail, openId: "" };
+  projectPickers.set(select, picker);
+
+  select.addEventListener("change", () => refreshProjectPicker(select));
+
+  return container;
+}
+
+function renderModificationItem(picker: { container: HTMLElement; mods: HTMLElement; detail: HTMLElement; openId: string }, modification: ModificationJob, selectedName: string): void {
+  const item = create("button", `↳ ${modification.name || "Modificación"} · ${formatModificationDate(modification.createdAt)} · ${statusLabel(modification.status)}`);
+  item.type = "button";
+  item.className = "project-picker-item project-picker-modification";
+  item.onclick = () => {
+    picker.openId = modification.id;
+    picker.detail.hidden = false;
+    picker.detail.innerHTML = "";
+    const title = create("strong", "Modificación");
+    const request = create("p", `Petición: ${modification.request || ""}`);
+    const date = create("p", `Fecha: ${formatModificationDate(modification.createdAt)}`);
+    const status = create("p", `Estado: ${statusLabel(modification.status)}`);
+    const phase = create("p", `Fase: ${modification.phase || ""}`);
+    picker.detail.append(title, request, date, status, phase);
+  };
+  picker.mods.appendChild(item);
+}
+
+function refreshProjectPicker(select: HTMLSelectElement): void {
+  const picker = projectPickers.get(select);
+  if (!picker) return;
+
+  const groups = buildProjectGroups(state.projects, state.jobs);
+  const selectedName = select.value || "";
+  const current = groups.find(group => group.project.name === selectedName);
+
+  picker.mods.innerHTML = "";
+  picker.mods.hidden = true;
+  picker.detail.hidden = true;
+
+  if (!selectedName || !current || !current.modifications.length) {
+    picker.container.hidden = true;
+    return;
+  }
+
+  picker.container.hidden = false;
+  picker.mods.hidden = false;
+  for (const modification of current.modifications) {
+    renderModificationItem(picker, modification, selectedName);
+  }
+}
+
+function refreshProjectPickers(): void {
+  for (const [select] of projectPickers) {
+    refreshProjectPicker(select);
+  }
 }
 
 async function loadProjects() {
@@ -805,6 +908,7 @@ async function loadProjects() {
   }
   els.projectSelect.value = state.projects.some(project => project.name === selectedProject) ? selectedProject : "";
   if (dirSelect) dirSelect.value = state.projects.some(project => project.name === selectedDirectory) ? selectedDirectory : "";
+  refreshProjectPickers();
 }
 
 type ViewMeta = { title: string; subtitle: string };

@@ -87,11 +87,12 @@ Repositorio: <https://github.com/jtarifap/FactoryOS>
 - Logs limitados y cancelación desde el panel. Las fases de proyecto tienen un timeout de 20 min; las consultas directas a Factory-manager, de 2 min.
 - Cada trabajo muestra su consumo de tokens (entrada, salida, razonamiento y caché) y el coste estimado. El total incluye al Factory-manager y a los subagentes que hayan intervenido, y el panel muestra además el consumo global registrado.
 - Para medir tokens sin mezclar trabajos, cada job usa una base SQLite aislada de OpenCode en `data/opencode/<job-id>.db`; si no se puede leer, se usa el respaldo de eventos `step_finish`. Al terminar un proyecto se escribe `factory/consumo-tokens.md` con el desglose.
-- Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas) y las bases de tokens en `data/opencode/`. Al reiniciar, jobs en ejecucion -> `failed` + lastError.
+- Se persiste `data/settings.json`, `data/jobs.json`, `data/model-tests.json` (historico de pruebas) y las bases de tokens en `data/opencode/`. Los JSON se escriben de forma atomica (temporal unico, `fsync` y reemplazo) para no perder el ultimo estado valido si falla el disco o el reemplazo. Al reiniciar, jobs en ejecucion -> `failed` + lastError.
 - Proyectos generados en `projects/<slug>-<id>/` con README, código, tests, dist, QA_REPORT, ENTREGA y DELIVERY_REPORT.
-- Modificacion de proyectos existentes: endpoint `/api/jobs` acepta `directory` existente + checkpoint automático en `projects/<slug>-<id>-checkpoint`.
-- Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado y symlinks fuera del proyecto. Al detener, mata el árbol de procesos completo (`taskkill /T /F`) esperando a que termine, para que la app no quede huérfana escuchando en su puerto.
-- ZIP: excluye `.git`, `node_modules`, `.cache` y logs. Antes de crear el archivo inspecciona nombres y fingerprints de alta confianza; si encuentra credenciales/llaves o no puede completar el escaneo, bloquea la descarga sin devolver valores secretos. Empaqueta un snapshot de los bytes inspeccionados. Límites: 20 000 entradas, 1 MiB por archivo y 50 MiB inspeccionados.
+- Cada trabajo persiste su accion (`new`, `modify` o `question`) y el worker la usa sin volver a inferirla del directorio. Los trabajos antiguos sin accion se tratan como consulta si su tipo era `question`, como modificacion si conservan un checkpoint y, en caso contrario, como creacion.
+- Modificacion de proyectos existentes: endpoint `/api/jobs` acepta `directory` existente + checkpoint verificado en `projects/<slug>-<id>-checkpoint`. Si el checkpoint falla o el destino ya existe, el trabajo no se crea ni se encola.
+- Vista previa: arranca/detiene apps y sirve estáticos con MIME; niega archivos sensibles, traversal codificado, symlinks fuera del proyecto y contenido con credenciales conocidas. Los argumentos extra se validan antes de `spawn` (sin metacaracteres de shell). El HTML de preview solo puede enmarcarse desde el panel local. Al detener, mata el árbol de procesos completo (`taskkill /T /F`) esperando a que termine, para que la app no quede huérfana escuchando en su puerto.
+- ZIP: excluye `.git`, `node_modules`, `.cache` y logs. Antes de crear el archivo inspecciona nombres y fingerprints de alta confianza; si encuentra credenciales/llaves o no puede completar el escaneo, bloquea la descarga sin devolver valores secretos. Empaqueta un snapshot de los bytes inspeccionados. Límites: 20 000 entradas, 1 MiB por archivo y 50 MiB inspeccionados. La descarga usa el nombre del proyecto, nunca una ruta absoluta.
 - El escaneo conservador puede bloquear proyectos con archivos legítimos grandes; no garantiza detectar todo formato de secreto. No empaquetes proyectos con credenciales.
 
 ## Endpoints principales
@@ -137,12 +138,20 @@ El pipeline de agentes (OpenCode) no se ejecuta en Render: la version publicada 
 
 ## Seguridad y persistencia
 
+- La API escucha solo en `127.0.0.1:4177` y el panel en `127.0.0.1:5173` con `strictPort`. No se abre a interfaces externas.
+- `server/request-security.ts` valida antes de enrutar: `Host` exacto de loopback, `Origin` exacto del panel/API en peticiones mutables, rechazo de `Sec-Fetch-Site: cross-site` en `/api`, rechazo de `OPTIONS` y `Content-Type: application/json` en los endpoints que parsean JSON. No se emite CORS comodín. Las peticiones locales sin `Origin` (curl/PowerShell) siguen funcionando.
+- `server/project-paths.ts` es el unico resolutor de proyectos: rechaza rutas absolutas, traversal, nombres reservados/invalidos de Windows, symlinks y junctions; comprueba la contencion canonica tras `realpath`. Jobs, preview, estáticos, listado y ZIP lo comparten.
+- La lectura de archivos estáticos usa un descriptor y `fstat`; en plataformas que lo soportan se añade `O_NOFOLLOW`, y siempre se valida la ruta canonica antes de abrir.
 - Jobs cancelados/no terminados -> `failed` al reiniciar, con lastError human-readable.
 - Las bases de tokens de `data/opencode/` contienen sesiones de OpenCode: permanecen en local, no se publican y se eliminan al borrar el trabajo.
-- No se ejecutan comandos fuera de `projects/`.
-- ZIP aplica detección por nombres y fingerprints de alta confianza; no es un escáner universal ni reemplaza la revisión del proyecto.
+- No se ejecutan comandos fuera de `projects/`. Los argumentos de preview se validan antes de `spawn`.
+- Los logs de jobs y preview, `lastError`, `answer` y los errores del ZIP pasan por `redactSecrets`; las respuestas de bloqueo solo muestran rutas, nunca valores.
+- ZIP aplica detección por nombres y fingerprints de alta confianza; no es un escáner universal ni reemplaza la revisión del proyecto. El escaneo conservador puede bloquear proyectos con archivos legítimos grandes.
+- No hay autenticación local: cualquier proceso de la misma máquina puede llamar a la API. La defensa es loopback + validación de Host/Origin, no la identidad del usuario.
+- En Windows no existe `O_NOFOLLOW`: queda una ventana TOCTOU teórica si otro proceso local reemplaza un archivo durante la lectura.
 - No se hace push ni despliegue sin autorizacion.
 - Procesos hijos se detienen en cancelacion mediante `taskkill /T /F`.
+- Este README documenta controles concretos; no certifica que toda la aplicación sea segura.
 
 ## Estructura y QA
 
@@ -156,7 +165,7 @@ El pipeline de agentes (OpenCode) no se ejecuta en Render: la version publicada 
 - `web/dashboard.ts`: estadísticas y filas de la tabla del dashboard (lógica pura, sin DOM).
 - `web/demo.ts`: detección del modo demo, datos de ejemplo y backend que sustituye a la API.
 - `render.yaml`: configuración de publicación como sitio estático en Render.
-- `tests/`: pruebas de API, ZIP, preview y landing.
+- `tests/`: pruebas de API, rutas/symlinks, Host/Origin/CSRF, secretos y redaccion, ZIP, preview y landing.
 - `public/images/readme/`: capturas del panel que usa la rejilla de este README, todas a 1905×861 para que la tabla quede pareja; el clic abre la imagen a tamaño completo.
 - `projects/`: proyectos generados por la fábrica.
 - Cada proyecto incluye `README.md`, `package.json`, codigo, tests, `dist/`, `QA_REPORT.md`.

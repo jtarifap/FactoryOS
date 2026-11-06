@@ -1,5 +1,58 @@
 # QA Report - FactoryOS 2.0
 
+## Rutas, API local y secretos (2026-11-06)
+
+**Modelo de amenaza.** Se asume un navegador hostil abierto por el usuario (sitio remoto, enlace o formulario cross-site), DNS rebinding contra servicios locales, proyectos generados o manipulados con symlinks/junctions, y secretos que pueden acabar en archivos, logs, respuestas o previews. Quedan fuera del modelo un atacante con control total de la cuenta de Windows o del disco: sin autenticacion no se puede distinguir de un usuario legitimo.
+
+**Rutas y sistema de archivos.**
+
+- `server/project-paths.ts` centraliza la resolucion. Solo acepta un hijo directo de `projects/` o la forma documentada `projects/<nombre>`; rechaza rutas absolutas, unidades (`C:`), UNC, traversal (`..`), `.`/`..`, nombres reservados de Windows (`CON`, `NUL`, `COM1`...), caracteres invalidos, NUL, punto/espacio final y nombres de mas de 255 bytes.
+- `resolveProjectDirectory` hace `realpath` de la raiz, `lstat` del candidato, rechaza symlinks/junctions y archivos que no sean directorios, y vuelve a comprobar la contencion tras `realpath`. Se usa en jobs, preview start/stop/status, servido estatico, listado `/api/projects` y ZIP.
+- El panel ya no envia la ruta absoluta del job al ZIP: envia el nombre del proyecto.
+- `readProjectFile` abre un descriptor, valida con `fstat` y lee del mismo descriptor para reducir TOCTOU. Donde existe se usa `O_NOFOLLOW`.
+
+**API local y navegador.**
+
+- La API sigue escuchando solo en `127.0.0.1:4177`; Vite en `127.0.0.1:5173` con `strictPort: true` para no aceptar un puerto no autorizado.
+- `server/request-security.ts` se ejecuta antes de cualquier ruta: allowlist exacta de `Host` (`127.0.0.1`/`localhost` en 4177 y 5173), `Origin` exacto en peticiones mutables, rechazo de `Origin: null`/no http, rechazo de `Sec-Fetch-Site: cross-site` en `/api`, rechazo de `OPTIONS` y `Content-Type: application/json` en los endpoints que parsean JSON. No se emite `Access-Control-Allow-Origin`.
+- Las peticiones sin `Origin` de clientes locales (curl, PowerShell) siguen permitidas; un navegador no puede omitir `Origin` en un POST cross-origin.
+- `/api/models/test` valida el id con `isModelId`. Los argumentos extra de preview se validan antes de `spawn` con shell: se rechazan metacaracteres de shell, saltos de linea y listas excesivas.
+- Cabeceras `X-Content-Type-Options: nosniff` y `Referrer-Policy: no-referrer` en la API; `frame-ancestors` limitado al panel en previews; el panel aplica `X-Frame-Options: DENY` y `frame-ancestors 'none'`.
+
+**Secretos y datos sensibles.**
+
+- Se ampliaron los fingerprints: AWS (clave secreta), GitHub fine-grained, GitLab, Slack, Stripe live, Google API, npm, SendGrid, OpenAI, Anthropic, URLs de bases de datos con credenciales y claves privadas.
+- Se detectan asignaciones de `api_key`, `secret`, `client_secret`, tokens y contrasenas, excluyendo placeholders (`changeme`, `example`, `your-...`, `process.env...`, `null`, etc.).
+- Nombres sensibles: `.env` (salvo `.env.example`/`.sample`/`.template`/`.dist`), `credentials*`, `id_rsa`/`id_ed25519`, `.npmrc`, `.netrc`, `.pypirc`, `.git-credentials`, `terraform.tfstate`, `.docker/config.json`, keystores y PEM privados. Los certificados publicos (`cert.pem`, `id_rsa.pub`, `.env.example`) no bloquean.
+- `redactSecrets` se aplica al escribir logs de jobs, al devolver `logs`, `lastError` y `answer` en `/api/jobs`, a los logs de preview y a los errores del ZIP. Las respuestas de bloqueo solo muestran rutas, nunca valores.
+- La vista previa estatica bloquea nombres sensibles y tambien contenido con credenciales de alta confianza, para que un `notes.txt` con una URL de base de datos no se convierta en un canal lateral.
+
+**Verificacion.**
+
+- `npm test`: **250/250 PASS** (nuevas pruebas de rutas, symlinks/junctions, Host/Origin/CSRF, secretos, redaccion y cableado).
+- `npx tsc --noEmit`: **PASS**.
+- `npm run build`: **PASS**.
+
+**Riesgos residuales.**
+
+- No hay autenticacion: cualquier proceso local puede llamar a la API. La defensa es el bind a loopback y la validacion de Host/Origin, no la identidad del usuario.
+- La allowlist depende de los puertos 4177/5173. Si se cambian, hay que actualizar `server/request-security.ts` y `vite.config.ts` a la vez.
+- En Windows `O_NOFOLLOW` no existe. El descriptor y `fstat` reducen la ventana TOCTOU, pero un atacante local que reemplace archivos o directorios en paralelo podria intentar una carrera entre la validacion y la apertura.
+- El detector es heuristico: puede no reconocer formatos nuevos o secretos codificados y puede bloquear archivos legitimos de alta entropia. No sustituye una revision del proyecto ni es cifrado/DLP.
+- `.env.example` se permite por nombre; si contuviera una credencial real de un formato no reconocido, podria pasar el filtro.
+- Las apps de preview ejecutan codigo del proyecto en la maquina por diseno; no hay sandbox de proceso.
+- `data/jobs.json`, los logs y los proyectos no se cifran en reposo. Los logs, `lastError` y `answer` se redactan al persistirse, pero el texto libre de la solicitud se conserva para poder reintentar el trabajo; si el usuario pega una credencial ahi, esa credencial queda almacenada.
+- Este informe documenta controles y pruebas concretas; no certifica que toda la aplicacion sea segura.
+
+## Enrutamiento por accion, checkpoint verificado y escritura atomica (2026-11-06)
+
+- Cada trabajo guarda `action` (`new`, `modify` o `question`). El worker usa ese valor persistido y ya no deduce una modificacion por la presencia de un directorio.
+- Los trabajos antiguos sin `action` se migran con un criterio seguro: consultas siguen siendo consultas, un checkpoint guardado prueba una modificacion y el resto de proyectos se tratan como creaciones. La regla evita convertir por accidente una creacion en una modificacion destructiva.
+- La modificacion crea un checkpoint antes de encolar el trabajo. La copia se verifica archivo por archivo; si falla, el destino ya existe o queda incompleto, se devuelve el error real y no se crea ni se ejecuta el trabajo. La ruta queda guardada en `job.checkpoint`.
+- `data/jobs.json`, `data/settings.json`, `data/model-tests.json`, `factory/consumo-tokens.md` y el frontmatter de los agentes usan escritura atomica: temporal unico en el mismo directorio, escritura completa, `fsync` y reemplazo con `rename`. Si falla, se conserva el ultimo archivo valido y se limpia el temporal.
+- `npm test`: **217/217 PASS** (nuevas pruebas de rutas, checkpoint, escritura atomica y cableado).
+- `npm run build`: **PASS**.
+
 ## Modo demo y publicacion estatica en Render (2026-11-04)
 
 - Sintoma: el despliegue en Render fallaba con `No open ports detected on 0.0.0.0` y `Port scan timeout reached`. Causa raiz: `server/index.ts` hacia `server.listen(4177, "127.0.0.1")`, es decir, puerto y host fijos; Render escanea `0.0.0.0` e inyecta su propia variable `PORT`.

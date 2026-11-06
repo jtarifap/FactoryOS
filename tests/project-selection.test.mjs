@@ -22,6 +22,7 @@ function fixture() {
   const code = source.slice(source.indexOf("async function loadProjects()"), source.indexOf("function buildApp()"));
   const context = vm.createContext({
     els: { projectSelect: preview }, state: {},
+    refreshProjectPickers: () => {},
     // The panel talks to the API through `apiFetch`, which falls back to the
     // real `fetch` when the demo mode is off.
     apiFetch: async () => ({ json: () => response }),

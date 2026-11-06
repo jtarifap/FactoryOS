@@ -11,11 +11,16 @@ import { handleZip } from "./zip.js";
 import { JobProcessRegistry, terminateChildTree, WorkerLease } from "./job-coordinator.js";
 import { appendVerificationEvidence, getProjectVerification, runProjectChecks, type VerificationCheck } from "./project-verification.js";
 import { captureDeliveryReportState, validateDeliveryCompletion, wasDeliveryReportUpdatedSince } from "./delivery-report.js";
-import { extractOpenCodeText, routeRequest, type RequestKind } from "./request-routing.js";
+import { extractOpenCodeText, resolveJobAction, routeRequest, type JobAction, type RequestKind } from "./request-routing.js";
+import { atomicWriteFileSync } from "./atomic-write.js";
+import { createCheckpoint } from "./checkpoint.js";
 import { AGENT_IDS, normalizeAgentModels, syncAgentModelFiles, type AgentId, type AgentModelMap, type ModelMode } from "./agent-model-config.js";
-import { mergeModelLists, modelsFromCatalog, parseModelBlocks, type ModelMeta } from "./model-list.js";
+import { mergeModelLists, modelsFromCatalog, parseModelBlocks, isModelId, type ModelMeta } from "./model-list.js";
 import { findOpenCodeDbPath, missingProviders, readConnectedProviderIds } from "./opencode-providers.js";
 import { readTokenUsageFromDb } from "./session-usage.js";
+import { resolveProjectDirectory } from "./project-paths.js";
+import { authorizeRequest } from "./request-security.js";
+import { readProjectFile, redactSecrets } from "./project-security.js";
 import {
   addTokenUsage,
   emptyTokenUsage,
@@ -56,7 +61,7 @@ type ModelSettings = {
   autoApprove: boolean;
   agentModelConfigVersion: 2;
 };
-type Job = { id: string; name: string; request: string; requestKind?: RequestKind; answer?: string; tokens?: TokenUsage; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
+type Job = { id: string; name: string; request: string; requestKind?: RequestKind; action?: JobAction; checkpoint?: string; answer?: string; tokens?: TokenUsage; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
 
 const DEFAULT_SETTINGS: ModelSettings = {
   mode: "independent",
@@ -86,7 +91,7 @@ try {
     agentModelConfigVersion: 2
   };
 } catch {}
-const saveSettings = () => fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf8");
+const saveSettings = () => atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf8");
 syncAgentModelFiles(path.join(ROOT, ".opencode", "agents"), settings.agentModels);
 saveSettings();
 
@@ -107,14 +112,26 @@ for (const j of jobs) if (j.status === "running") {
   j.lastError = "El servidor se reinició mientras el trabajo estaba en ejecución.";
   j.logs.push("Proceso interrumpido: revisa los archivos antes de reintentar.");
 }
-const save = () => fs.writeFileSync(DB, JSON.stringify(jobs, null, 2));
+// Legacy jobs get the same safe fallback as the worker: never infer a
+// modification from the directory alone.
+for (const j of jobs) if (!j.action) j.action = resolveJobAction(j);
+// Persist through a unique temporary in DATA, fsync and fs.renameSync over DB.
+// A failed write or replacement leaves the previous valid jobs.json intact.
+// Logs are redacted when they are appended. Errors and answers can also carry
+// provider output, so they are redacted again before they reach jobs.json.
+const persistedJob = (j: Job) => ({
+  ...j,
+  lastError: j.lastError ? redactSecrets(j.lastError) : j.lastError,
+  answer: j.answer ? redactSecrets(j.answer) : j.answer,
+});
+const save = () => atomicWriteFileSync(DB, JSON.stringify(jobs.map(persistedJob), null, 2));
 save();
 let active: { id: string; child: ChildProcessByStdio<null, Readable, Readable> } | null = null;
 const workerLease = new WorkerLease();
 const jobProcesses = new JobProcessRegistry(killTree);
 const stamp = () => new Date().toISOString();
 function log(j: Job, s: string) {
-  j.logs.push(...s.split(/\r?\n/).filter(Boolean).map(x => `[${stamp()}] ${x.slice(0, 3000)}`));
+  j.logs.push(...s.split(/\r?\n/).filter(Boolean).map(x => `[${stamp()}] ${redactSecrets(x).slice(0, 3000)}`));
   if (j.logs.length > 600) j.logs = j.logs.slice(-600);
   j.updatedAt = stamp(); save();
 }
@@ -381,7 +398,7 @@ function writeTokenUsageFile(j: Job): void {
   try {
     const factoryDir = path.join(j.directory, "factory");
     fs.mkdirSync(factoryDir, { recursive: true });
-    fs.writeFileSync(path.join(factoryDir, "consumo-tokens.md"), tokenUsageMarkdown(j.tokens), "utf8");
+    atomicWriteFileSync(path.join(factoryDir, "consumo-tokens.md"), tokenUsageMarkdown(j.tokens), "utf8");
   } catch {
     // The project may be read-only or removed; token usage is still shown in the app.
   }
@@ -540,11 +557,9 @@ async function worker() {
   if (!j) { releaseWorker(); return; }
   j.status = "running"; j.updatedAt = stamp(); save();
   try {
-    const route = routeRequest(j.requestKind ?? "project", j.directory);
-    if (!route) {
-      j.status = "failed"; j.phase = "Tipo de solicitud no válido";
-      j.lastError = "El trabajo no contiene un tipo de solicitud compatible.";
-    } else if (route.kind === "question") {
+    const action = resolveJobAction(j);
+    j.action = action;
+    if (action === "question") {
       log(j, "Factory-manager responde directamente; no se crea proyecto ni se inicia pipeline.");
       const response = await runConsultation(j, `Responde directamente a esta consulta en español. No delegues en agentes, no uses herramientas, no crees ni modifiques archivos. Consulta: ${j.request}`);
       if ((j.status as Status) === "cancelled") return;
@@ -570,9 +585,9 @@ async function worker() {
         log(j, validation.message);
         const deliveryBeforeState = captureDeliveryReportState(j.directory);
         const deliveryStartedAtNs = BigInt(Date.now()) * 1_000_000n;
-        const action = route.action === "modify" ? "modifica el proyecto existente" : "construye un proyecto nuevo";
-        const projectPrompt = `Gestiona una solicitud de proyecto: ${action}. Como único punto de entrada, clasifica la complejidad, define stack y pipeline según tus instrucciones, y coordina a los subagentes seleccionados. Mantén todos los cambios dentro de este directorio. Solicitud del usuario: ${j.request}`;
-        log(j, `Factory-manager inicia el pipeline para ${route.action === "modify" ? "modificar el proyecto seleccionado" : "crear el proyecto"}.`);
+        const actionDescription = action === "modify" ? "modifica el proyecto existente" : "construye un proyecto nuevo";
+        const projectPrompt = `Gestiona una solicitud de proyecto: ${actionDescription}. Como único punto de entrada, clasifica la complejidad, define stack y pipeline según tus instrucciones, y coordina a los subagentes seleccionados. Mantén todos los cambios dentro de este directorio. Solicitud del usuario: ${j.request}`;
+        log(j, `Factory-manager inicia el pipeline para ${action === "modify" ? "modificar el proyecto seleccionado" : "crear el proyecto"}.`);
         const managerOk = await runAgent(j, "factory-manager", projectPrompt);
         if ((j.status as Status) === "cancelled") return;
         if (!managerOk) {
@@ -596,8 +611,8 @@ async function worker() {
               j.status = "needs_intervention"; j.phase = "Requiere intervención";
               j.lastError = verify.summary.slice(0, 3000);
             } else {
-              const reportPath = path.join(j.directory, "DELIVERY_REPORT.md");
-              const reportContent = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, "utf8") : "";
+              const reportFile = readProjectFile(j.directory, "DELIVERY_REPORT.md");
+              const reportContent = reportFile ? reportFile.data.toString("utf8") : "";
               const reportFresh = wasDeliveryReportUpdatedSince(j.directory, deliveryStartedAtNs, deliveryBeforeState);
               const deliveryCompletion = validateDeliveryCompletion(true, reportFresh, reportContent);
               if (!deliveryCompletion.ok) {
@@ -626,12 +641,8 @@ async function worker() {
 }
 
 function safeProjectPath(input: string): string | null {
-  if (!input) return null;
-  const dir = path.resolve(PROJECTS, path.basename(input));
-  if (!dir.startsWith(PROJECTS + path.sep)) return null;
-  try { if (!fs.statSync(dir).isDirectory()) return null; }
-  catch { return null; }
-  return dir;
+  const result = resolveProjectDirectory(PROJECTS, input);
+  return result.ok ? result.directory : null;
 }
 
 const reply = (res: http.ServerResponse, code: number, data: unknown) => {
@@ -645,6 +656,17 @@ const readBody = async (req: http.IncomingMessage, limit = 20000): Promise<strin
 };
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || "/", "http://127.0.0.1");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  const decision = authorizeRequest({
+    method: req.method || "GET",
+    pathname: u.pathname,
+    host: req.headers.host,
+    origin: req.headers.origin,
+    secFetchSite: req.headers["sec-fetch-site"] as string | undefined,
+    contentType: req.headers["content-type"],
+  });
+  if (!decision.ok) return reply(res, decision.status, { error: decision.error });
   if (u.pathname === "/api/health") return reply(res, 200, { ok: true, mode: "local", active: active?.id || null });
   if (u.pathname === "/api/settings" && req.method === "GET") return reply(res, 200, settings);
   if (u.pathname === "/api/settings" && req.method === "PUT") {
@@ -679,13 +701,13 @@ const server = http.createServer(async (req, res) => {
     let input: any; try { input = JSON.parse(body); } catch { return reply(res, 400, { error: "JSON inválido" }); }
     const model = String(input.model || "").trim();
     const agent = input.agent as AgentId;
-    if (!model || !AGENT_IDS.includes(agent)) return reply(res, 400, { error: "Modelo o agente no válido" });
+    if (!isModelId(model) || !AGENT_IDS.includes(agent)) return reply(res, 400, { error: "Modelo o agente no válido" });
     const result = await testOpenCodeModel(model, agent);
     let history: any[] = [];
     try { history = JSON.parse(fs.readFileSync(path.join(DATA, "model-tests.json"), "utf8")); } catch {}
     history.push({ timestamp: stamp(), model, agent, ok: result.ok, error: result.error, duration: result.duration });
     if (history.length > 500) history = history.slice(-500);
-    fs.writeFileSync(path.join(DATA, "model-tests.json"), JSON.stringify(history, null, 2), "utf8");
+    atomicWriteFileSync(path.join(DATA, "model-tests.json"), JSON.stringify(history, null, 2), "utf8");
     settings.modelStatus[model] = result.ok ? "ok" : "no-results";
     saveSettings();
     return reply(res, result.ok ? 200 : 422, result);
@@ -698,40 +720,57 @@ const server = http.createServer(async (req, res) => {
       const stored = readTokenUsageFromDb(jobDatabasePath(job.id));
       if (stored) job.tokens = stored;
     }
-    return reply(res, 200, jobs.map(x => ({ ...x, request: x.request.slice(0, 1000) })).reverse());
+    return reply(res, 200, jobs.map(x => ({
+      ...x,
+      request: x.request.slice(0, 1000),
+      logs: x.logs.map(redactSecrets),
+      lastError: x.lastError ? redactSecrets(x.lastError) : x.lastError,
+      answer: x.answer ? redactSecrets(x.answer) : x.answer,
+    })).reverse());
   }
   if (u.pathname === "/api/jobs" && req.method === "POST") {
     const body = await readBody(req);
     if (body === null) return reply(res, 413, { error: "Solicitud demasiado grande" });
     let input: any; try { input = JSON.parse(body); } catch { return reply(res, 400, { error: "JSON inválido" }); }
-    const requestedKind = input.requestKind ?? "project";
+    const requestedKind = input.requestKind ?? (input.action === "question" ? "question" : "project");
     const existingInput = typeof input.directory === "string" ? input.directory.trim() : "";
-    const route = routeRequest(requestedKind, existingInput);
+    const route = routeRequest(requestedKind, existingInput, input.action);
     if (!route) return reply(res, 400, { error: "Tipo de solicitud no válido" });
-    const name = route.kind === "question" ? "Consulta" : String(input.name || "").trim();
+    const action: JobAction = route.kind === "question" ? "question" : route.action;
+    const name = action === "question" ? "Consulta" : String(input.name || "").trim();
     const request = String(input.request || "").trim();
-    const minRequestLength = route.kind === "question" ? 1 : 15;
+    const minRequestLength = action === "question" ? 1 : 15;
     if (!name || name.length > 55 || request.length < minRequestLength || request.length > 12000) return reply(res, 400, { error: "Nombre o descripción no válidos" });
     const id = randomUUID().slice(0, 8);
     let directory = "";
     let existingSafe: string | null = null;
-    const checkpoint = route.kind === "project" && route.action === "modify";
-    if (route.kind === "project" && checkpoint) {
+    const checkpoint = action === "modify";
+    if (checkpoint) {
       existingSafe = safeProjectPath(existingInput);
       if (!existingSafe) return reply(res, 400, { error: "Directorio no valido o fuera de projects/" });
       directory = existingSafe;
-    } else if (route.kind === "project") {
+    } else if (action === "new") {
       directory = path.join(PROJECTS, slug(name) + "-" + id);
       fs.mkdirSync(directory, { recursive: true });
     }
-    const phase = route.kind === "question" ? "En cola (consulta)" : checkpoint ? "En cola (modificacion)" : "En cola";
-    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, tokens: emptyTokenUsage(), status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
+    const phase = action === "question" ? "En cola (consulta)" : checkpoint ? "En cola (modificacion)" : "En cola";
+    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, action, tokens: emptyTokenUsage(), status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
     if (checkpoint && existingSafe) {
-      try { fs.cpSync(existingSafe, path.join(PROJECTS, `${slug(name)}-${id}-checkpoint`), { recursive: true, errorOnExist: false, force: true }); }
-      catch { }
-      log(j, `Modificacion de proyecto existente. Checkpoint creado en ${path.basename(existingSafe)}-${id}-checkpoint.`);
+      // createCheckpoint copies with fs.cpSync({ recursive: true, errorOnExist: true, force: false }),
+      // verifies every entry and cleans partial destinations before this job is pushed.
+      const checkpointPath = path.join(DATA, "checkpoints", `${slug(name)}-${id}`);
+      try {
+        createCheckpoint(existingSafe, checkpointPath);
+        j.checkpoint = checkpointPath;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[FactoryOS] No se pudo crear el checkpoint de ${existingSafe}: ${message}`);
+        return reply(res, /ya existe/i.test(message) ? 409 : 500, { error: `No se pudo crear el checkpoint: ${message}` });
+      }
     }
-    jobs.push(j); save(); setImmediate(worker); return reply(res, 201, { id });
+    jobs.push(j);
+    if (checkpoint && j.checkpoint) log(j, `Modificacion de proyecto existente. Checkpoint verificado en ${path.basename(j.checkpoint)}.`);
+    save(); setImmediate(worker); return reply(res, 201, { id, action });
   }
   const match = u.pathname.match(/^\/api\/jobs\/([a-f0-9]{8})\/cancel$/);
   if (match && req.method === "POST") {

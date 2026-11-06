@@ -51,6 +51,16 @@
 .preview-link{display:inline-block;margin-top:6px;color:var(--accent);font-size:13px;text-decoration:underline}
 .preview-link:hover{color:var(--text)}
 
+/* Modificaciones debajo del select de proyecto existente / vista previa */
+.project-picker{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.project-picker-mods{margin-top:6px;padding:6px 8px;border:1px dashed var(--border);border-radius:6px;background:var(--surface)}
+.project-picker-item{display:block;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);padding:6px 8px;border-radius:6px;cursor:pointer}
+.project-picker-item:hover{border-color:var(--accent);background:rgba(255,159,28,.08)}
+.project-picker-modification{margin-left:18px;font-size:13px}
+.project-picker-detail{padding:8px;border:1px dashed var(--border);border-radius:8px;background:var(--surface)}
+.project-picker-detail[hidden]{display:none}
+.modification-badge{display:inline-block;margin:4px 0;padding:2px 8px;border-radius:999px;background:rgba(255,159,28,.12);color:var(--accent);font-size:12px}
+
 /* Modo demo: aviso sobre la cabecera y acciones que necesitan la API local */
 .demo-banner{background:var(--surface);border-bottom:1px solid var(--border);border-left:3px solid var(--accent);color:var(--text);padding:12px 20px;font-size:13px;line-height:1.6}
 html[data-demo="on"] button:disabled{cursor:not-allowed;opacity:.45}

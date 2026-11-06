@@ -4,7 +4,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { createScannedSnapshot, ProjectScanLimitError } from "./project-security.js";
+import { createScannedSnapshot, ProjectScanLimitError, redactSecrets } from "./project-security.js";
+import { resolveProjectDirectory } from "./project-paths.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECTS = path.join(ROOT, "projects");
@@ -21,17 +22,8 @@ function hasFiles(dir: string): boolean {
 }
 
 function safeProjectPath(input: string): string | null {
-  if (!input) return null;
-  const dir = path.resolve(PROJECTS, path.basename(input));
-  try {
-    const projectsRoot = fs.realpathSync(PROJECTS);
-    const realDir = fs.realpathSync(dir);
-    const relative = path.relative(projectsRoot, realDir);
-    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
-    if (!fs.statSync(realDir).isDirectory()) return null;
-    return realDir;
-  }
-  catch { return null; }
+  const result = resolveProjectDirectory(PROJECTS, input);
+  return result.ok ? result.directory : null;
 }
 
 function createZip(dir: string, outPath: string): Promise<{ ok: boolean; error?: string }> {
@@ -61,7 +53,7 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
   // GET /api/projects/zip?directory=<name> -> generate (if needed) and stream.
   if (u.pathname === "/api/projects/zip" && req.method === "GET") {
     const dir = safeProjectPath(String(u.searchParams.get("directory") || ""));
-    if (!dir) { reply(400, { error: "Directorio inválido" }); return true; }
+    if (!dir) { reply(400, { error: "Directorio invï¿½lido" }); return true; }
     const snapshotParent = path.join(ZIPS, `.scan-${randomUUID()}`);
     const snapshotDir = path.join(snapshotParent, path.basename(dir));
     try {
@@ -69,17 +61,17 @@ export async function handleZip(req: http.IncomingMessage, res: http.ServerRespo
       try { candidates = createScannedSnapshot(dir, snapshotDir); }
       catch (error) {
         if (error instanceof ProjectScanLimitError) { reply(422, { error: error.message }); return true; }
-        reply(500, { error: "No se pudo completar la inspección de seguridad; no se creó el ZIP." });
+        reply(500, { error: "No se pudo completar la inspecciï¿½n de seguridad; no se creï¿½ el ZIP." });
         return true;
       }
       if (candidates.length) {
-        reply(422, { error: "ZIP bloqueado: se detectaron archivos sensibles o posibles secretos.", files: candidates });
+        reply(422, { error: "ZIP bloqueado: se detectaron archivos sensibles o posibles secretos.", files: candidates.map(redactSecrets) });
         return true;
       }
       const out = path.join(ZIPS, `${path.basename(dir)}.zip`);
       if (!hasFiles(snapshotDir)) { reply(422, { error: "El proyecto esta vacio o no contiene archivos exportables." }); fs.rmSync(snapshotDir, { recursive: true, force: true }); fs.rmSync(snapshotParent, { recursive: true, force: true }); return true; }
       const r = await createZip(snapshotDir, out);
-      if (!r.ok) { reply(500, { error: `No se pudo crear el ZIP: ${r.error || "error desconocido"}` }); return true; }
+      if (!r.ok) { reply(500, { error: redactSecrets(`No se pudo crear el ZIP: ${r.error || "error desconocido"}`) }); return true; }
       const stat = fs.statSync(out);
       res.writeHead(200, {
         "Content-Type": "application/zip",

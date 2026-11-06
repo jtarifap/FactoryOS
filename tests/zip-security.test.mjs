@@ -67,6 +67,46 @@ test("ZIP rejects high-confidence synthetic secret content in benign-named files
   });
 });
 
+test("ZIP rejects local credential stores and database URLs without returning their values", async () => {
+  await withProject(async ({ name, directory, archive }) => {
+    const npmToken = "npm_SYNTHETIC0123456789abcdefghijklmnopqrst";
+    fs.writeFileSync(path.join(directory, "index.html"), "safe page");
+    fs.writeFileSync(path.join(directory, ".npmrc"), `//registry.npmjs.org/:_authToken=${npmToken}`);
+    fs.writeFileSync(path.join(directory, "notes.txt"), "postgres://fixture:supersecretpassword@db.example.com/app");
+    await withZipServer(async origin => {
+      const response = await fetch(`${origin}/api/projects/zip?directory=${encodeURIComponent(name)}`);
+      const body = await response.text();
+      assert.equal(response.status, 422);
+      assert.match(body, /\.npmrc/);
+      assert.match(body, /notes\.txt/);
+      assert.equal(body.includes(npmToken), false);
+      assert.equal(body.includes("supersecretpassword"), false);
+      assert.equal(fs.existsSync(archive), false);
+    });
+  });
+});
+
+test("ZIP accepts documented placeholder examples", async () => {
+  await withProject(async ({ name, directory }) => {
+    fs.writeFileSync(path.join(directory, "index.html"), "safe page");
+    fs.writeFileSync(path.join(directory, ".env.example"), "API_KEY=your-api-key-here\nTOKEN=changeme");
+    await withZipServer(async origin => {
+      const response = await fetch(`${origin}/api/projects/zip?directory=${encodeURIComponent(name)}`);
+      assert.equal(response.status, 200);
+    });
+  });
+});
+
+test("ZIP rejects absolute paths and traversal in the directory parameter", async () => {
+  const name = `security-path-${randomUUID()}`;
+  await withZipServer(async origin => {
+    for (const value of ["../" + name, "C:\\Windows", "C:/Windows", "projects/../" + name, "..", "CON"]) {
+      const response = await fetch(`${origin}/api/projects/zip?directory=${encodeURIComponent(value)}`);
+      assert.equal(response.status, 400, value);
+    }
+  });
+});
+
 test("ZIP rejects mixed-case excluded directory names instead of skipping their scan", async () => {
   await withProject(async ({ name, directory }) => {
     fs.mkdirSync(path.join(directory, ".GIT"));

@@ -16,6 +16,8 @@ test("static preview serves ordinary files but hides credential files", async ()
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(path.join(directory, "index.html"), "<h1>safe</h1>");
   fs.writeFileSync(path.join(directory, ".env"), "SYNTHETIC_VALUE=not-a-real-secret");
+  fs.writeFileSync(path.join(directory, ".npmrc"), "//registry.npmjs.org/:_authToken=npm_SYNTHETIC0123456789abcdefghijklmnopqrst");
+  fs.writeFileSync(path.join(directory, "notes.txt"), "postgres://fixture:supersecretpassword@db.example.com/app");
   const server = http.createServer(async (req, res) => {
     try { await handlePreview(req, res, new URL(req.url || "/", `http://${req.headers.host}`)); }
     catch { if (!res.writableEnded) { res.writeHead(500); res.end(); } }
@@ -27,9 +29,16 @@ test("static preview serves ordinary files but hides credential files", async ()
     const page = await fetch(`${origin}/preview-static/${name}/`);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /safe/);
+    assert.match(page.headers.get("content-security-policy") || "", /frame-ancestors/);
     const env = await fetch(`${origin}/preview-static/${name}/.env`);
     assert.equal(env.status, 404);
     assert.doesNotMatch(await env.text(), /SYNTHETIC_VALUE/);
+    const npmrc = await fetch(`${origin}/preview-static/${name}/.npmrc`);
+    assert.equal(npmrc.status, 404);
+    assert.doesNotMatch(await npmrc.text(), /SYNTHETIC0123456789/);
+    const notes = await fetch(`${origin}/preview-static/${name}/notes.txt`);
+    assert.equal(notes.status, 404);
+    assert.doesNotMatch(await notes.text(), /supersecretpassword/);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(directory, { recursive: true, force: true });

@@ -54,6 +54,27 @@ export function splitExtraArgs(input: string): string[] {
   return args;
 }
 
+const MAX_PREVIEW_ARGS = 32;
+const MAX_PREVIEW_ARG_LENGTH = 200;
+// Arguments are joined by Node when `shell: true` is used, so shell
+// metacharacters would become command injection. Normal flags, hosts, ports,
+// paths and quoted titles do not need any of these characters.
+const UNSAFE_PREVIEW_ARG = /[&|<>^()%!;"'`$*?{}\[\]\r\n\0]/;
+
+export function isSafePreviewArg(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  if (!value || value.length > MAX_PREVIEW_ARG_LENGTH) return false;
+  return !UNSAFE_PREVIEW_ARG.test(value);
+}
+
+export function validatePreviewArgs(args: string[]): string | null {
+  if (args.length > MAX_PREVIEW_ARGS) return "La vista previa no admite más de 32 argumentos extra.";
+  if (args.some(arg => !isSafePreviewArg(arg))) {
+    return "Los argumentos extra contienen caracteres no permitidos.";
+  }
+  return null;
+}
+
 const hasPortArgument = (args: string[]): boolean =>
   args.some(arg => arg === "--port" || arg === "-p" || arg.startsWith("--port="));
 

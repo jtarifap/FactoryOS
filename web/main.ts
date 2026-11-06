@@ -367,6 +367,16 @@ function renderCreateJob(): HTMLElement {
   form.appendChild(directoryLabel);
   form.appendChild(directory);
   createProjectPicker(directory);
+  const scopeLabel = create("label", "Alcance del cambio");
+  scopeLabel.hidden = true;
+  const scope = document.createElement("select");
+  scope.id = "modification-scope";
+  scope.appendChild(new Option("Automático (recomendado)", "auto"));
+  scope.appendChild(new Option("Cambio rápido (texto o estilos)", "quick"));
+  scope.appendChild(new Option("Completo (rediseño o funcionalidad)", "full"));
+  scope.hidden = true;
+  scopeLabel.appendChild(scope);
+  form.appendChild(scopeLabel);
   form.appendChild(submit);
   form.appendChild(feedback);
 
@@ -390,6 +400,10 @@ function renderCreateJob(): HTMLElement {
     request.readOnly = isQuestion;
     directoryLabel.hidden = isQuestion;
     directory.hidden = isQuestion;
+    // The scope only makes sense for an existing project: a new project always
+    // runs the full pipeline.
+    scopeLabel.hidden = isQuestion || !directory.value;
+    scope.hidden = scopeLabel.hidden;
     submit.textContent = isQuestion
       ? "Consultar"
       : directory.value ? "Modificar proyecto" : "Crear y ejecutar";
@@ -408,7 +422,10 @@ function renderCreateJob(): HTMLElement {
       requestKind: kind,
       action,
     };
-    if (action === "modify") payload.directory = directory.value;
+    if (action === "modify") {
+      payload.directory = directory.value;
+      payload.scope = scope.value;
+    }
     const r = await apiFetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -432,6 +449,7 @@ function renderCreateJob(): HTMLElement {
       name.value = "";
       request.value = "";
       directory.selectedIndex = 0;
+      scope.value = "auto";
       updateFormMode();
     }
     await loadJobs();

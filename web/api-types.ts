@@ -14,6 +14,7 @@ export type Job = {
   request: string;
   requestKind?: "project" | "question";
   action?: "new" | "modify" | "question";
+  scope?: "quick" | "full";
   checkpoint?: string;
   answer?: string;
   tokens?: TokenUsage;

@@ -1,6 +1,6 @@
 ---
 description: Orquestador de la factoría. Clasifica el proyecto por complejidad, decide si hay interfaz, define el stack y elige qué agentes intervienen.
-model: openrouter/nvidia/nemotron-3.5-super-vl:free
+model: openrouter/deepseek/deepseek-v4.1-flash-1017
 mode: primary
 temperature: 0.1
 tools:
@@ -112,6 +112,13 @@ complejo 500000. Ajusta si el usuario indica otro límite. La aplicación que
 te ejecuta es quien mide y aplica el presupuesto; tú solo lo declaras.
 
 Después invoca al primer agente del pipeline como subagente y pásale `factory/plan.json`. Coordina las fases siguientes en el orden de `pipeline`; no ejecutes fases omitidas ni sustituyas las decisiones del plan.
+
+## Modificaciones puntuales
+
+Si el trabajo es una modificacion puntual de un proyecto existente (cambio de
+texto, color, espaciado o estilo), no regeneres el diseno ni la documentacion de
+entrega: aplica solo el cambio y devuelve el control. No invoques al disenador
+ni al delivery-manager para un retoque de texto.
 
 ## Reglas
 

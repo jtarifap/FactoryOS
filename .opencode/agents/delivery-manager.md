@@ -1,6 +1,6 @@
 ---
 description: Empaqueta y entrega el proyecto final con documentación, adaptando el nivel de detalle a la complejidad.
-model: openrouter/nvidia/nemotron-3.5-super-vl:free
+model: openrouter/deepseek/deepseek-v4.1-flash-1017
 mode: subagent
 temperature: 0.1
 tools:

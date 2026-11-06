@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import test from "node:test";
+
+const read = name => fs.readFileSync(new URL(`../.opencode/agents/${name}.md`, import.meta.url), "utf8");
+
+test("the designer can update an existing design file", () => {
+  const designer = read("disenador");
+  assert.match(designer, /^\s*edit:\s*true\s*$/m, "The designer must be able to edit factory/diseno.md");
+  assert.match(designer, /^\s*write:\s*true\s*$/m);
+});
+
+test("the factory manager does not regenerate design or delivery for a tweak", () => {
+  const manager = read("factory-manager");
+  assert.match(manager, /modificacion puntual|modificación puntual/i);
+  assert.match(manager, /no regener/i);
+  assert.match(manager, /presupuesto_tokens/);
+});

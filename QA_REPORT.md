@@ -1,5 +1,16 @@
 # QA Report - FactoryOS 2.0
 
+## Ruta rápida y presupuesto real (2026-11-06)
+
+- Sintoma: una modificacion de texto costo 0,12 USD y 4,5 M de tokens. El pipeline de creacion (diseno -> desarrollo -> entrega) se aplicaba a un retoque de una linea y la app nunca aplicaba el `presupuesto_tokens` que el propio plan declaraba.
+- Causa 1: `presupuesto_tokens` solo existia en el prompt del factory-manager; el servidor no lo leia. Un plan de 50.000 tokens termino en 4.500.000 (90x).
+- Causa 2: el disenador declaraba `edit: false`, asi que no podia actualizar `factory/diseno.md` en una modificacion. La fase se perdia y el developer tenia que rehacerla.
+- Causa 3: el coste real lo generaba releer la conversacion completa en cada turno (4,1 M de tokens de cache), no el cambio en si.
+- Cambios: `server/modification-scope.ts` (clasificador determinista: 600 caracteres y sin terminos de funcionalidad), `server/job-budget.ts` (60.000 para rapido, `presupuesto_tokens` del plan para completo, 200.000 por defecto), `server/index.ts` (campo `scope`, ruta rapida con developer directo y `done`, corte real por presupuesto con lectura cada 15 s y `needs_intervention`), `web/main.ts` (selector de alcance), `.opencode/agents/disenador.md` (`edit: true`) y `.opencode/agents/factory-manager.md` (no regenerar diseno ni entrega en cambios puntuales).
+- `npm test`: **269/269 PASS** (nuevas pruebas del clasificador, presupuesto, cableado, panel e instrucciones de agentes).
+- `npx tsc --noEmit`: **PASS**. `npm run build`: **PASS**.
+- Riesgos: la clasificacion es heuristica por palabras clave; una peticion que oculta una necesidad funcional detras de un texto corto puede ir por la ruta rapida y quedar incompleta. El usuario puede forzar *Completo* en el selector. El corte por presupuesto mata la fase, por lo que un limite demasiado bajo deja trabajo a medias en el proyecto, aunque el checkpoint permite recuperarlo.
+
 ## Historial de modificaciones y checkpoints ocultos (2026-11-06)
 
 - Sintoma: cada modificacion hacia aparecer un proyecto extra `<slug>-<id>-checkpoint` en los desplegables.

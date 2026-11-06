@@ -1,6 +1,6 @@
 ---
 description: Auditoría de seguridad. Solo interviene en proyectos de complejidad compleja.
-model: openrouter/nvidia/nemotron-3.5-super-vl:free
+model: openrouter/deepseek/deepseek-v4.1-flash-1017
 mode: subagent
 temperature: 0.1
 tools:

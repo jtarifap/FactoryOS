@@ -18,6 +18,8 @@ import { AGENT_IDS, normalizeAgentModels, syncAgentModelFiles, type AgentId, typ
 import { mergeModelLists, modelsFromCatalog, parseModelBlocks, isModelId, type ModelMeta } from "./model-list.js";
 import { findOpenCodeDbPath, missingProviders, readConnectedProviderIds } from "./opencode-providers.js";
 import { readTokenUsageFromDb } from "./session-usage.js";
+import { classifyModification, type ModificationScope } from "./modification-scope.js";
+import { isOverBudget, resolveBudget, DEFAULT_FULL_BUDGET } from "./job-budget.js";
 import { resolveProjectDirectory } from "./project-paths.js";
 import { authorizeRequest } from "./request-security.js";
 import { readProjectFile, redactSecrets } from "./project-security.js";
@@ -61,7 +63,7 @@ type ModelSettings = {
   autoApprove: boolean;
   agentModelConfigVersion: 2;
 };
-type Job = { id: string; name: string; request: string; requestKind?: RequestKind; action?: JobAction; checkpoint?: string; answer?: string; tokens?: TokenUsage; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
+type Job = { id: string; name: string; request: string; requestKind?: RequestKind; action?: JobAction; scope?: ModificationScope; budgetExceeded?: boolean; checkpoint?: string; answer?: string; tokens?: TokenUsage; status: Status; phase: string; createdAt: string; updatedAt: string; directory: string; logs: string[]; lastError?: string };
 
 const DEFAULT_SETTINGS: ModelSettings = {
   mode: "independent",
@@ -404,7 +406,17 @@ function writeTokenUsageFile(j: Job): void {
   }
 }
 
-function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
+/** Budget declared by the factory plan, if the plan exists and is readable. */
+function planBudget(directory: string): unknown {
+  try {
+    const raw = fs.readFileSync(path.join(directory, "factory", "plan.json"), "utf8");
+    return JSON.parse(raw)?.presupuesto_tokens;
+  } catch {
+    return undefined;
+  }
+}
+
+function runAgent(j: Job, agent: AgentId, prompt: string, budget: number | (() => number) = DEFAULT_FULL_BUDGET): Promise<boolean> {
   return new Promise(resolve => {
     if (j.status === "cancelled") return resolve(false);
     const model = effectiveModel(agent);
@@ -420,6 +432,20 @@ function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
     let tailOutput = "";
     let logBuffer = "";
     const timer = setTimeout(() => { log(j, "Tiempo máximo de fase agotado (20 min)."); killTree(child); }, 20 * 60 * 1000);
+    // The plan budget is enforced while the phase runs, not afterwards: the
+    // real usage is read from the job database every 15 seconds and the process
+    // tree is stopped as soon as the limit is crossed.
+    const budgetTimer = setInterval(() => {
+      if (finished || j.status === "cancelled") return;
+      const stored = readTokenUsageFromDb(jobDatabasePath(j.id));
+      const used = stored?.total ?? j.tokens?.total ?? 0;
+      const limit = typeof budget === "function" ? budget() : budget;
+      if (!isOverBudget(used, limit)) return;
+      j.budgetExceeded = true;
+      j.lastError = `${agent}: presupuesto de tokens superado (${used} > ${limit}).`;
+      log(j, `Presupuesto superado en ${agent}: ${used} tokens > ${limit}. Se detiene la fase.`);
+      killTree(child);
+    }, 15_000);
     const flushLogs = (final = false) => {
       const lines = logBuffer.split(/\r?\n/);
       logBuffer = final ? "" : lines.pop() || "";
@@ -439,7 +465,7 @@ function runAgent(j: Job, agent: AgentId, prompt: string): Promise<boolean> {
     child.stderr!.on("data", onData);
     child.on("error", e => log(j, "Error al iniciar OpenCode: " + e.message));
     child.on("close", code => {
-      if (finished) return; finished = true; clearTimeout(timer); active = null;
+      if (finished) return; finished = true; clearTimeout(timer); clearInterval(budgetTimer); active = null;
       flushLogs(true);
       const usage = recordTokenUsage(j, rawOutput);
       log(j, `Agente ${agent} · modelo ${model}: salida ${code} · ${formatTokenUsage(usage)}`);
@@ -581,6 +607,33 @@ async function worker() {
         if (validation.output) log(j, validation.output);
         j.status = "failed"; j.phase = "Modelo no válido o no disponible";
         j.lastError = validation.message;
+      } else if (j.scope === "quick") {
+        // Cambio puntual: un solo agente y sin regenerar diseno ni entrega.
+        log(j, validation.message);
+        log(j, "Modificacion puntual: se ejecuta solo el developer, sin diseno ni entrega.");
+        const quickPrompt = [
+          "Aplica un cambio puntual en este proyecto existente.",
+          "Modifica solo lo necesario para cumplir la peticion; no rediseñes la interfaz ni regeneres la documentacion de entrega.",
+          "No anadas funcionalidad, dependencias ni archivos nuevos salvo que la peticion lo exija de forma explicita.",
+          `Peticion: ${j.request}`,
+        ].join("\n");
+        const quickOk = await runAgent(j, "developer", quickPrompt, resolveBudget("quick", undefined));
+        if ((j.status as Status) === "cancelled") return;
+        if (!quickOk) {
+          if (j.budgetExceeded) {
+            j.status = "needs_intervention"; j.phase = "Presupuesto superado";
+          } else {
+            j.status = "failed"; j.phase = "Falló el developer";
+          }
+        } else {
+          const verify = await verifyProject(j);
+          if (!verify.ok) {
+            j.status = "needs_intervention"; j.phase = "Requiere intervención";
+            j.lastError = verify.summary.slice(0, 3000);
+          } else {
+            j.status = "done"; j.phase = "Cambio aplicado";
+          }
+        }
       } else {
         log(j, validation.message);
         const deliveryBeforeState = captureDeliveryReportState(j.directory);
@@ -588,10 +641,15 @@ async function worker() {
         const actionDescription = action === "modify" ? "modifica el proyecto existente" : "construye un proyecto nuevo";
         const projectPrompt = `Gestiona una solicitud de proyecto: ${actionDescription}. Como único punto de entrada, clasifica la complejidad, define stack y pipeline según tus instrucciones, y coordina a los subagentes seleccionados. Mantén todos los cambios dentro de este directorio. Solicitud del usuario: ${j.request}`;
         log(j, `Factory-manager inicia el pipeline para ${action === "modify" ? "modificar el proyecto seleccionado" : "crear el proyecto"}.`);
-        const managerOk = await runAgent(j, "factory-manager", projectPrompt);
+        const fullBudget = () => resolveBudget("full", planBudget(j.directory));
+        const managerOk = await runAgent(j, "factory-manager", projectPrompt, fullBudget);
         if ((j.status as Status) === "cancelled") return;
         if (!managerOk) {
-          j.status = "failed"; j.phase = "Falló Factory-manager";
+          if (j.budgetExceeded) {
+            j.status = "needs_intervention"; j.phase = "Presupuesto superado";
+          } else {
+            j.status = "failed"; j.phase = "Falló Factory-manager";
+          }
         } else {
           let verify = await verifyProject(j);
           let attempts = 0;
@@ -601,9 +659,13 @@ async function worker() {
             j.phase = `Factory-manager corrige errores (intento ${attempts}/3)`;
             save();
             const correctionPrompt = `Continúa el proyecto existente: la verificación técnica detectó estos problemas. Coordina la corrección con el subagente adecuado según el pipeline aprobado.\n${verify.summary.slice(0, 8000)}\nNo despliegues, no hagas push ni uses secretos.`;
-            const correctionOk = await runAgent(j, "factory-manager", correctionPrompt);
+            const correctionOk = await runAgent(j, "factory-manager", correctionPrompt, fullBudget);
             if ((j.status as Status) === "cancelled") return;
-            if (!correctionOk) { j.status = "failed"; j.phase = "Falló la corrección coordinada por Factory-manager"; break; }
+            if (!correctionOk) {
+              if (j.budgetExceeded) { j.status = "needs_intervention"; j.phase = "Presupuesto superado"; }
+              else { j.status = "failed"; j.phase = "Falló la corrección coordinada por Factory-manager"; }
+              break;
+            }
             verify = await verifyProject(j);
           }
           if (j.status === "running") {
@@ -741,6 +803,13 @@ const server = http.createServer(async (req, res) => {
     const request = String(input.request || "").trim();
     const minRequestLength = action === "question" ? 1 : 15;
     if (!name || name.length > 55 || request.length < minRequestLength || request.length > 12000) return reply(res, 400, { error: "Nombre o descripción no válidos" });
+    // The client may force the scope; "auto" uses the deterministic classifier so
+    // the cost of a text tweak never depends on the model's judgement.
+    const requestedScope = input.scope === undefined || input.scope === "" ? "auto" : String(input.scope);
+    if (!["auto", "quick", "full"].includes(requestedScope)) return reply(res, 400, { error: "Alcance del cambio no válido" });
+    const scope: ModificationScope = action !== "modify"
+      ? "full"
+      : requestedScope === "auto" ? classifyModification(request) : requestedScope as ModificationScope;
     const id = randomUUID().slice(0, 8);
     let directory = "";
     let existingSafe: string | null = null;
@@ -754,7 +823,7 @@ const server = http.createServer(async (req, res) => {
       fs.mkdirSync(directory, { recursive: true });
     }
     const phase = action === "question" ? "En cola (consulta)" : checkpoint ? "En cola (modificacion)" : "En cola";
-    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, action, tokens: emptyTokenUsage(), status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
+    const now = stamp(); const j: Job = { id, name, request, requestKind: route.kind, action, scope, tokens: emptyTokenUsage(), status: "queued", phase, createdAt: now, updatedAt: now, directory, logs: [] };
     if (checkpoint && existingSafe) {
       // createCheckpoint copies with fs.cpSync({ recursive: true, errorOnExist: true, force: false }),
       // verifies every entry and cleans partial destinations before this job is pushed.
@@ -770,7 +839,7 @@ const server = http.createServer(async (req, res) => {
     }
     jobs.push(j);
     if (checkpoint && j.checkpoint) log(j, `Modificacion de proyecto existente. Checkpoint verificado en ${path.basename(j.checkpoint)}.`);
-    save(); setImmediate(worker); return reply(res, 201, { id, action });
+    save(); setImmediate(worker); return reply(res, 201, { id, action, scope });
   }
   const match = u.pathname.match(/^\/api\/jobs\/([a-f0-9]{8})\/cancel$/);
   if (match && req.method === "POST") {

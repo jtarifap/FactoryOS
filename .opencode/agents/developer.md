@@ -1,6 +1,6 @@
 ---
 description: Desarrolla el proyecto siguiendo el plan del Factory-manager y el diseño si existe, en el stack indicado en plan.json.
-model: openrouter/nvidia/nemotron-3.5-super-vl:free
+model: openrouter/deepseek/deepseek-v4.1-flash-1017
 mode: subagent
 temperature: 0.2
 tools:

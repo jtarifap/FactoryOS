@@ -310,6 +310,34 @@ test("switching modes restores project fields and reveals the existing-project s
   assert.equal(elements.find(el => el.tagName === "BUTTON" && el.textContent === "Crear y ejecutar")?.textContent, "Crear y ejecutar");
 });
 
+test("a modification exposes a scope selector and sends the chosen scope", async () => {
+  const { elements, calls } = await mount();
+  const directory = elements.find(el => el.dataset.role === "existing-directory");
+  const scope = elements.find(el => el.id === "modification-scope");
+  assert.ok(directory && scope, "Missing modification scope controls");
+  assert.equal(scope.hidden, true, "The scope selector only applies to an existing project");
+
+  directory.value = "projects/sample";
+  directory.onchange();
+  assert.equal(scope.hidden, false);
+
+  elements.find(el => el.placeholder === "Nombre del proyecto").value = "Ajuste";
+  elements.find(el => el.tagName === "TEXTAREA").value = "Cambia el color del boton a naranja";
+  scope.value = "quick";
+  const form = elements.find(el => typeof el.onsubmit === "function");
+  await form.onsubmit({ preventDefault() {} });
+
+  const job = calls.find(call => call.url === "/api/jobs" && call.options?.method === "POST");
+  assert.ok(job, "Missing job submission");
+  const payload = JSON.parse(job.options.body);
+  assert.equal(payload.action, "modify");
+  assert.equal(payload.scope, "quick");
+
+  elements.find(el => el.id === "request-kind").value = "question";
+  elements.find(el => el.id === "request-kind").onchange();
+  assert.equal(scope.hidden, true, "Consultations must hide the scope selector");
+});
+
 test("theme toggle updates the root theme, saved preference and accessible icon", async () => {
   const { document, elements, storage } = await mount();
   const button = elements.find(el => el.className === "secondary theme-toggle");
